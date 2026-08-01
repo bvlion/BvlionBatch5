@@ -27,6 +27,34 @@
 
 本番実行環境と配置構成は[本番実行環境](docs/production-environment.md)を参照してください。
 
+## ローカル実行
+
+依存関係をインストールします。
+
+```shell
+composer install
+```
+
+PHPの組み込みWebサーバーでアプリケーションを起動します。
+
+```shell
+php -S 127.0.0.1:8080 -t public public/index.php
+```
+
+別のターミナルから、任意の未定義ルートへアクセスするとJSON形式の404エラーが返ります。
+
+```shell
+curl -i http://127.0.0.1:8080/undefined-route
+```
+
+構文確認、コーディング規約の確認、テストは次のコマンドで実行します。
+
+```shell
+composer lint
+composer style
+composer test
+```
+
 ## 開発運用
 
 - 1つのIssueにつき、1つのブランチと1つのPRを作成します。
