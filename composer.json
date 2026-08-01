@@ -1,0 +1,28 @@
+{
+    "name": "bvlion/bvlion-batch5",
+    "description": "HTTP APIs migrated from the previous batch environments",
+    "type": "project",
+    "require": {
+        "php": "^8.5",
+        "slim/psr7": "^1.8",
+        "slim/slim": "^4.15"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^13.2",
+        "squizlabs/php_codesniffer": "^4.0"
+    },
+    "config": {
+        "platform": {
+            "php": "8.5.5"
+        }
+    },
+    "scripts": {
+        "lint": [
+            "@php -l bootstrap/app.php",
+            "@php -l public/index.php",
+            "@php -l tests/NotFoundRouteTest.php"
+        ],
+        "style": "phpcs",
+        "test": "phpunit"
+    }
+}

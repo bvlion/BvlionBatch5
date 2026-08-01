@@ -27,6 +27,41 @@
 
 本番実行環境と配置構成は[本番実行環境](docs/production-environment.md)を参照してください。
 
+## ローカル実行
+
+ローカルPCにはDockerのみ必要です。PHPとComposerをローカルPCへインストールする必要はありません。
+
+appコンテナをビルドし、依存関係をインストールします。
+
+```shell
+docker compose build app
+docker compose run --rm app composer install
+```
+
+Docker Composeでアプリケーションを起動します。
+
+```shell
+docker compose up app
+```
+
+ブラウザで`http://127.0.0.1:8080/undefined-route`へアクセスすると、JSON形式の404エラーが返ります。
+
+アプリケーションを停止します。
+
+```shell
+docker compose down
+```
+
+構文確認、コーディング規約の確認、テストは次のコマンドで実行します。
+
+```shell
+docker compose run --rm app composer lint
+docker compose run --rm app composer style
+docker compose run --rm app composer test
+```
+
+Dockerはローカル開発でのみ使用します。本番環境はDocker化せず、XServerのPHP 8.5.5を使用します。詳細は[本番実行環境](docs/production-environment.md)を参照してください。
+
 ## 開発運用
 
 - 1つのIssueにつき、1つのブランチと1つのPRを作成します。
