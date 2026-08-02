@@ -16,7 +16,7 @@ final class ConfigurationTest extends TestCase
         self::assertSame(
             [
                 'app' => [
-                    'timezone' => 'Etc/UTC',
+                    'timezone' => 'Asia/Tokyo',
                 ],
                 'database' => [
                     'host' => 'database.example.test',
