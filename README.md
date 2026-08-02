@@ -97,6 +97,18 @@ docker compose run --rm --no-deps app php bin/check-slack.php
 
 このコマンドはテスト用文面`Slack API connectivity test.`を1件投稿します。成功時はToken、チャンネルID、メッセージの`ts`を出力せず、`Slack connectivity check succeeded.`だけを表示します。
 
+## 記念日通知
+
+`dating`テーブルで通知日、通知文面、投稿先チャンネルIDを管理します。マイグレーションには本番値を含めません。通知設定には次の列を使用します。
+
+| 列 | 用途 |
+| --- | --- |
+| `target_date` | 毎年通知する`MMdd`、または100日単位で通知する`yyyyMMdd` |
+| `message` | 通知文面。`yyyyMMdd`の場合は`%s`へ経過日数を挿入 |
+| `channel_id` | 投稿先のSlackチャンネルID |
+
+`POST /api/dating/notify`は、日本時間の当日を基準に該当データを判定します。8桁の`yyyyMMdd`が未来の日付の場合は通知対象外です。同じチャンネルに複数の該当データがある場合は、文面を改行でまとめて1件投稿します。該当データがない場合は投稿しません。処理はリクエスト内で同期実行し、正常終了時はHTTP 204を返します。
+
 ## API認証
 
 認証対象ルートと使用するBearer Tokenは次のとおりです。

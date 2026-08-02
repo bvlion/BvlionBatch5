@@ -2,16 +2,59 @@
 
 declare(strict_types=1);
 
+use BvlionBatch5\Database\ConnectionFactory;
+use BvlionBatch5\Dating\DatingNotificationService;
+use BvlionBatch5\Dating\DatingRepository;
+use BvlionBatch5\Middleware\BearerTokenMiddleware;
+use BvlionBatch5\Slack\SlackClient;
+use GuzzleHttp\Client;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Slim\Factory\AppFactory;
 
 require_once __DIR__ . '/../vendor/autoload.php';
-require __DIR__ . '/config.php';
+$configuration = require __DIR__ . '/config.php';
 
 $app = AppFactory::create();
 $app->addRoutingMiddleware();
+
+$databaseConfiguration = $configuration['database'];
+$datingNotificationService = new DatingNotificationService(
+    new DatingRepository(
+        new ConnectionFactory(
+            $databaseConfiguration['host'],
+            $databaseConfiguration['port'],
+            $databaseConfiguration['name'],
+            $databaseConfiguration['user'],
+            $databaseConfiguration['password'],
+        ),
+    ),
+    new SlackClient(
+        new Client(),
+        $configuration['slack']['bot_token'],
+    ),
+    new DateTimeZone($configuration['app']['timezone']),
+);
+
+$app
+    ->post(
+        '/api/dating/notify',
+        function (
+            ServerRequestInterface $request,
+            ResponseInterface $response,
+        ) use ($datingNotificationService): ResponseInterface {
+            $datingNotificationService->notify();
+
+            return $response->withStatus(204);
+        },
+    )
+    ->add(
+        new BearerTokenMiddleware(
+            $configuration['bearer_token']['scheduler'],
+            $app->getResponseFactory(),
+        ),
+    );
 
 $app->add(
     function (
