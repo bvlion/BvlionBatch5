@@ -50,7 +50,10 @@ final class DatingNotificationService
                         ->diff($today)
                         ->format('%r%a');
 
-                    if ($elapsedDays % 100 === 0) {
+                    if (
+                        $elapsedDays >= 0
+                        && $elapsedDays % 100 === 0
+                    ) {
                         $message = sprintf(
                             $dating['message'],
                             number_format($elapsedDays),

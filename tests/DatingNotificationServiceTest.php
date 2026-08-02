@@ -140,6 +140,38 @@ final class DatingNotificationServiceTest extends TestCase
         );
     }
 
+    public function testFutureEightDigitTargetDateDoesNotPostMessage(): void
+    {
+        $datingRepository = $this->createStub(DatingRepository::class);
+        $datingRepository->method('findAll')->willReturn([
+            [
+                'target_date' => '20260411',
+                'message' => 'Example milestone: %s days.',
+                'channel_id' => 'C0000000000',
+            ],
+        ]);
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create(new MockHandler());
+        $handlerStack->push(Middleware::history($requestHistory));
+        $service = new DatingNotificationService(
+            $datingRepository,
+            new SlackClient(
+                new Client(['handler' => $handlerStack]),
+                'xoxb-example-bot-token',
+            ),
+            new DateTimeZone('Asia/Tokyo'),
+        );
+
+        $service->notify(
+            new DateTimeImmutable(
+                '2026-01-01 12:00:00',
+                new DateTimeZone('Asia/Tokyo'),
+            ),
+        );
+
+        self::assertCount(0, $requestHistory);
+    }
+
     public function testNonMatchingTargetsDoNotPostMessage(): void
     {
         $datingRepository = $this->createStub(DatingRepository::class);
