@@ -2,27 +2,27 @@
 
 declare(strict_types=1);
 
-use BvlionBatch5\Slack\SlackClient;
+use BvlionBatch5\Slack\SlackConnectivityCheckCommand;
+use Dotenv\Dotenv;
 use GuzzleHttp\Client;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-$configuration = require __DIR__ . '/../bootstrap/config.php';
+$dotenv = Dotenv::createImmutable(dirname(__DIR__));
+$dotenv->safeLoad();
+
+$botToken = $_ENV['SLACK_BOT_TOKEN']
+    ?? $_SERVER['SLACK_BOT_TOKEN']
+    ?? null;
 $channelId = $_ENV['SLACK_TEST_CHANNEL_ID']
     ?? $_SERVER['SLACK_TEST_CHANNEL_ID']
     ?? null;
 
-if (!is_string($channelId) || $channelId === '') {
-    throw new RuntimeException('SLACK_TEST_CHANNEL_ID is required.');
+try {
+    (new SlackConnectivityCheckCommand(
+        new Client(),
+    ))->run($botToken, $channelId);
+} catch (RuntimeException $exception) {
+    fwrite(STDERR, $exception->getMessage() . "\n");
+    exit(1);
 }
-
-$slackClient = new SlackClient(
-    new Client(),
-    $configuration['slack']['bot_token'],
-);
-$slackClient->postMessage(
-    $channelId,
-    'Slack API connectivity test.',
-);
-
-fwrite(STDOUT, "Slack connectivity check succeeded.\n");
