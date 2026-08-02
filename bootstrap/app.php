@@ -8,6 +8,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Slim\Factory\AppFactory;
 
 require_once __DIR__ . '/../vendor/autoload.php';
+require __DIR__ . '/config.php';
 
 $app = AppFactory::create();
 $app->addRoutingMiddleware();

@@ -18,6 +18,32 @@ BvlionBatch5は、XServer上で動作する認証付きHTTP APIを提供する�
 
 本番実行環境と配置構成は[本番実行環境](docs/production-environment.md)を参照してください。
 
+## 環境設定
+
+`.env.example`を`.env`としてコピーし、実行環境に合わせて値を設定します。
+
+```shell
+cp .env.example .env
+```
+
+| 環境変数 | 用途 |
+| --- | --- |
+| `APP_TIMEZONE` | アプリケーションのタイムゾーン |
+| `DB_HOST` | データベースのホスト |
+| `DB_PORT` | データベースのポート |
+| `DB_NAME` | データベース名 |
+| `DB_USER` | データベースのユーザー名 |
+| `DB_PASSWORD` | データベースのパスワード |
+| `SLACK_BOT_TOKEN` | Slack Bot Token |
+| `IMAP_HOST` | IMAPサーバーのホスト |
+| `IMAP_PORT` | IMAPサーバーのポート |
+| `IMAP_USERNAME` | IMAP接続のユーザー名 |
+| `IMAP_PASSWORD` | IMAP接続のパスワード |
+| `SCHEDULER_BEARER_TOKEN` | メール処理・記念日通知用Bearer Token |
+| `OVERTIME_BEARER_TOKEN` | 定型Slack通知用Bearer Token |
+
+すべての環境変数が必須です。本番値は`.env`または実行環境の環境変数で注入し、コミットしません。設定が未指定または空の場合は、秘密値を含めず、該当する環境変数名を示してリクエスト処理を失敗させます。
+
 ## ローカル実行
 
 ローカルPCにはDockerのみ必要です。PHPとComposerをローカルPCへインストールする必要はありません。
