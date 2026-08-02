@@ -6,6 +6,8 @@ use BvlionBatch5\Database\ConnectionFactory;
 use BvlionBatch5\Dating\DatingNotificationService;
 use BvlionBatch5\Dating\DatingRepository;
 use BvlionBatch5\Middleware\BearerTokenMiddleware;
+use BvlionBatch5\Overtime\OvertimeNotificationRepository;
+use BvlionBatch5\Overtime\OvertimeNotificationService;
 use BvlionBatch5\Slack\SlackClient;
 use GuzzleHttp\Client;
 use Psr\Http\Message\ResponseInterface;
@@ -36,6 +38,21 @@ $datingNotificationService = new DatingNotificationService(
     ),
     new DateTimeZone($configuration['app']['timezone']),
 );
+$overtimeNotificationService = new OvertimeNotificationService(
+    new OvertimeNotificationRepository(
+        new ConnectionFactory(
+            $databaseConfiguration['host'],
+            $databaseConfiguration['port'],
+            $databaseConfiguration['name'],
+            $databaseConfiguration['user'],
+            $databaseConfiguration['password'],
+        ),
+    ),
+    new SlackClient(
+        new Client(),
+        $configuration['slack']['bot_token'],
+    ),
+);
 
 $app
     ->post(
@@ -52,6 +69,28 @@ $app
     ->add(
         new BearerTokenMiddleware(
             $configuration['bearer_token']['scheduler'],
+            $app->getResponseFactory(),
+        ),
+    );
+
+$app
+    ->post(
+        '/api/overtime/notify',
+        function (
+            ServerRequestInterface $request,
+            ResponseInterface $response,
+        ) use ($overtimeNotificationService): ResponseInterface {
+            $result = $overtimeNotificationService->notify();
+            $response->getBody()->write(
+                json_encode($result['body'], JSON_THROW_ON_ERROR),
+            );
+
+            return $response->withStatus($result['status']);
+        },
+    )
+    ->add(
+        new BearerTokenMiddleware(
+            $configuration['bearer_token']['overtime'],
             $app->getResponseFactory(),
         ),
     );

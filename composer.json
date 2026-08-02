@@ -38,6 +38,8 @@
             "@php -l src/Dating/DatingNotificationService.php",
             "@php -l src/Dating/DatingRepository.php",
             "@php -l src/Middleware/BearerTokenMiddleware.php",
+            "@php -l src/Overtime/OvertimeNotificationRepository.php",
+            "@php -l src/Overtime/OvertimeNotificationService.php",
             "@php -l src/Slack/SlackConnectivityCheckCommand.php",
             "@php -l src/Slack/SlackClient.php",
             "@php -l tests/BearerTokenMiddlewareTest.php",
@@ -46,6 +48,8 @@
             "@php -l tests/DatingNotificationRouteTest.php",
             "@php -l tests/DatingNotificationServiceTest.php",
             "@php -l tests/NotFoundRouteTest.php",
+            "@php -l tests/OvertimeNotificationRouteTest.php",
+            "@php -l tests/OvertimeNotificationServiceTest.php",
             "@php -l tests/SlackConnectivityCheckCommandTest.php",
             "@php -l tests/SlackClientTest.php"
         ],

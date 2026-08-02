@@ -121,6 +121,30 @@ docker compose run --rm --no-deps app php bin/check-slack.php
 
 各ルートの実装時に`BearerTokenMiddleware`をルートミドルウェアとして登録し、`Authorization: Bearer <token>`ヘッダーを検証します。ヘッダーが未指定、形式不正、またはトークンが一致しない場合は、トークン値をレスポンスへ含めずHTTP 401を返します。
 
+## 残業通知
+
+`overtime_notification_settings`テーブルの`id = 1`で、通知文面と投稿先SlackチャンネルIDを管理します。マイグレーションには本番値を含めません。
+
+| 列 | 用途 |
+| --- | --- |
+| `message` | 通知文面 |
+| `channel_id` | 投稿先のSlackチャンネルID |
+
+HTTP Shortcutsから`POST /api/overtime/notify`を呼び出し、`Authorization: Bearer <OVERTIME_BEARER_TOKEN>`ヘッダーを設定します。リクエスト本文は使用せず、通知文面を外部から指定できません。
+
+旧HomeServerのIncoming Webhookは再利用しません。旧WebhookをSlackの管理画面で失効させ、現在のSlack Appと`SLACK_BOT_TOKEN`を使用します。
+
+成功時はHTTP 200で次のJSONを返します。
+
+```json
+{
+  "message": "Overtime notification sent.",
+  "timestamp": "1234567890.123456"
+}
+```
+
+設定がない場合はHTTP 500、Slack投稿に失敗した場合はHTTP 502で、秘密値を含まないJSONエラーを返します。
+
 ## ローカル実行
 
 ローカルPCにはDockerのみ必要です。PHPとComposerをローカルPCへインストールする必要はありません。
