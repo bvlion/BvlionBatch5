@@ -63,6 +63,28 @@ docker compose run --rm app composer migrate
 
 本番データ、データベースダンプ、個人情報、秘密情報はリポジトリへ配置しません。`dating`、`mail_api`、設定、メール処理履歴の各テーブルは、対応する後続Issueでマイグレーションを追加します。
 
+## Slack App設定
+
+本番Slack Appは、次の手順で設定します。
+
+1. Slack Appの「Basic Information」で、Botの表示名とアイコンを設定します。
+2. 「OAuth & Permissions」のBot Token Scopesへ`chat:write`を追加します。`chat:write.customize`は追加しません。
+3. Slack Appを対象のワークスペースへインストールまたは再インストールします。
+4. 通知先とする各チャンネルへSlack Appを追加します。
+5. Bot Tokenを本番環境の`SLACK_BOT_TOKEN`へ設定します。
+6. 通知先はチャンネルIDで管理し、実際のチャンネル名、チャンネルID、Bot Tokenをリポジトリや共有ログへ記録しません。
+
+投稿にはSlack Web APIの[`chat.postMessage`](https://docs.slack.dev/reference/methods/chat.postMessage)を使用します。表示名、アイコン、チャンネル名はリクエストで上書きしません。
+
+実チャンネルへの疎通確認は、Slack Appを確認先チャンネルへ追加した後、本番環境で次のコマンドを実行します。`C0000000000`は実データから生成していない架空のチャンネルIDであり、実行時だけ実際の確認先チャンネルIDへ置き換えます。
+
+```shell
+SLACK_TEST_CHANNEL_ID=C0000000000 \
+    /opt/php-8.5.5/bin/php bin/check-slack.php
+```
+
+このコマンドはテスト用文面`Slack API connectivity test.`を1件投稿します。成功時はToken、チャンネルID、メッセージの`ts`を出力せず、`Slack connectivity check succeeded.`だけを表示します。
+
 ## API認証
 
 認証対象ルートと使用するBearer Tokenは次のとおりです。
