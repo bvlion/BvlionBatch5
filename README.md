@@ -1,21 +1,12 @@
 # BvlionBatch5
 
-旧環境で稼働しているバッチ処理を、XServer上の認証付きHTTP APIへ移行するプロジェクトです。
+BvlionBatch5は、XServer上で動作する認証付きHTTP APIを提供するプロジェクトです。
 
-## 移行範囲
+## 提供する機能
 
-### 対象
-
-- 旧BvlionBatch4のメール処理
-- 旧BvlionBatch4の記念日通知
-- 旧HomeServerの残業通知
-
-### 対象外
-
-- 旧BvlionBatch4の `/horoscope`
-- 旧BvlionBatch4の `/speak-time`
-
-対象外の機能はBvlionBatch5へ移行しません。移行範囲を変更する場合は、対象を明記したIssueで合意してから着手します。
+- メールの取得・Slack通知・振り分け
+- 記念日通知
+- スマートフォンから実行する定型Slack通知
 
 ## 技術方針
 
