@@ -76,11 +76,23 @@ docker compose run --rm app composer migrate
 
 投稿にはSlack Web APIの[`chat.postMessage`](https://docs.slack.dev/reference/methods/chat.postMessage)を使用します。表示名、アイコン、チャンネル名はリクエストで上書きしません。
 
-実チャンネルへの疎通確認は、Slack Appを確認先チャンネルへ追加した後、本番環境で次のコマンドを実行します。`C0000000000`は実データから生成していない架空のチャンネルIDであり、実行時だけ実際の確認先チャンネルIDへ置き換えます。
+実チャンネルへの疎通確認には`SLACK_BOT_TOKEN`と`SLACK_TEST_CHANNEL_ID`だけを使用します。DB、IMAP、Bearer Tokenなど、アプリ本体の他の環境変数は不要です。
+
+ローカルでは、Git管理対象外の`.env`へ2つの値だけを設定し、Docker経由で実行します。次の値は実データから生成していない架空値のため、実行時は実際のBot Tokenと確認先チャンネルIDへ置き換えます。
+
+```dotenv
+SLACK_BOT_TOKEN=xoxb-example-bot-token
+SLACK_TEST_CHANNEL_ID=C0000000000
+```
 
 ```shell
-SLACK_TEST_CHANNEL_ID=C0000000000 \
-    /opt/php-8.5.5/bin/php bin/check-slack.php
+docker compose run --rm --no-deps app php bin/check-slack.php
+```
+
+本番環境では、`.env`または実行環境へ同じ2つの環境変数を設定し、XServerのPHP 8.5.5を明示して実行します。
+
+```shell
+/opt/php-8.5.5/bin/php bin/check-slack.php
 ```
 
 このコマンドはテスト用文面`Slack API connectivity test.`を1件投稿します。成功時はToken、チャンネルID、メッセージの`ts`を出力せず、`Slack connectivity check succeeded.`だけを表示します。
