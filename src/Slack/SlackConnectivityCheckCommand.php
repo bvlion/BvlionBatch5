@@ -14,17 +14,8 @@ final class SlackConnectivityCheckCommand
     ) {
     }
 
-    public function run(
-        ?string $connectivityCheck,
-        ?string $botToken,
-        ?string $channelId,
-    ): void {
-        if ($connectivityCheck !== '1') {
-            throw new RuntimeException(
-                'SLACK_CONNECTIVITY_CHECK=1 is required.',
-            );
-        }
-
+    public function run(?string $botToken, ?string $channelId): void
+    {
         if ($botToken === null || trim($botToken) === '') {
             throw new RuntimeException('SLACK_BOT_TOKEN is required.');
         }

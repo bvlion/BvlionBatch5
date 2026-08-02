@@ -15,54 +15,6 @@ use RuntimeException;
 
 final class SlackConnectivityCheckCommandTest extends TestCase
 {
-    public function testMissingConnectivityCheckDoesNotSendRequest(): void
-    {
-        $requestHistory = [];
-        $handlerStack = HandlerStack::create(new MockHandler());
-        $handlerStack->push(Middleware::history($requestHistory));
-        $command = new SlackConnectivityCheckCommand(
-            new Client(['handler' => $handlerStack]),
-        );
-
-        try {
-            $command->run(null, null, null);
-            self::fail('RuntimeException was not thrown.');
-        } catch (RuntimeException $exception) {
-            self::assertSame(
-                'SLACK_CONNECTIVITY_CHECK=1 is required.',
-                $exception->getMessage(),
-            );
-        }
-
-        self::assertCount(0, $requestHistory);
-    }
-
-    public function testInvalidConnectivityCheckDoesNotSendRequest(): void
-    {
-        $requestHistory = [];
-        $handlerStack = HandlerStack::create(new MockHandler());
-        $handlerStack->push(Middleware::history($requestHistory));
-        $command = new SlackConnectivityCheckCommand(
-            new Client(['handler' => $handlerStack]),
-        );
-
-        try {
-            $command->run(
-                '0',
-                'xoxb-example-bot-token',
-                'C0000000000',
-            );
-            self::fail('RuntimeException was not thrown.');
-        } catch (RuntimeException $exception) {
-            self::assertSame(
-                'SLACK_CONNECTIVITY_CHECK=1 is required.',
-                $exception->getMessage(),
-            );
-        }
-
-        self::assertCount(0, $requestHistory);
-    }
-
     public function testMissingBotTokenFailsWithEnvironmentName(): void
     {
         $command = new SlackConnectivityCheckCommand(
@@ -72,7 +24,7 @@ final class SlackConnectivityCheckCommandTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('SLACK_BOT_TOKEN is required.');
 
-        $command->run('1', null, 'C0000000000');
+        $command->run(null, 'C0000000000');
     }
 
     public function testEmptyBotTokenFailsWithEnvironmentName(): void
@@ -84,7 +36,7 @@ final class SlackConnectivityCheckCommandTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('SLACK_BOT_TOKEN is required.');
 
-        $command->run('1', '', 'C0000000000');
+        $command->run('', 'C0000000000');
     }
 
     public function testMissingChannelIdFailsWithEnvironmentName(): void
@@ -98,7 +50,7 @@ final class SlackConnectivityCheckCommandTest extends TestCase
             'SLACK_TEST_CHANNEL_ID is required.',
         );
 
-        $command->run('1', 'xoxb-example-bot-token', null);
+        $command->run('xoxb-example-bot-token', null);
     }
 
     public function testEmptyChannelIdFailsWithEnvironmentName(): void
@@ -112,7 +64,7 @@ final class SlackConnectivityCheckCommandTest extends TestCase
             'SLACK_TEST_CHANNEL_ID is required.',
         );
 
-        $command->run('1', 'xoxb-example-bot-token', '');
+        $command->run('xoxb-example-bot-token', '');
     }
 
     public function testSuccessOutputsOnlySuccessMessage(): void
@@ -136,7 +88,6 @@ final class SlackConnectivityCheckCommandTest extends TestCase
         );
 
         $command->run(
-            '1',
             'xoxb-example-bot-token',
             'C0000000000',
         );

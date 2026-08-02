@@ -6,8 +6,6 @@ services:
     depends_on:
       database:
         condition: service_healthy
-    environment:
-      SLACK_CONNECTIVITY_CHECK: ${SLACK_CONNECTIVITY_CHECK:-0}
     ports:
       - "8080:8080"
     volumes:
