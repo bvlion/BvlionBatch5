@@ -9,4 +9,27 @@
             <directory>tests</directory>
         </testsuite>
     </testsuites>
+    <php>
+        <env name="APP_TIMEZONE" value="Asia/Tokyo" force="true"/>
+        <env name="DB_HOST" value="database.example.test" force="true"/>
+        <env name="DB_PORT" value="3306" force="true"/>
+        <env name="DB_NAME" value="example_database" force="true"/>
+        <env name="DB_USER" value="example_database_user" force="true"/>
+        <env name="DB_PASSWORD" value="example_database_password" force="true"/>
+        <env name="SLACK_BOT_TOKEN" value="example_slack_bot_token" force="true"/>
+        <env name="IMAP_HOST" value="imap.example.test" force="true"/>
+        <env name="IMAP_PORT" value="993" force="true"/>
+        <env name="IMAP_USERNAME" value="user@example.test" force="true"/>
+        <env name="IMAP_PASSWORD" value="example_imap_password" force="true"/>
+        <env
+            name="SCHEDULER_BEARER_TOKEN"
+            value="example_scheduler_bearer_token"
+            force="true"
+        />
+        <env
+            name="OVERTIME_BEARER_TOKEN"
+            value="example_overtime_bearer_token"
+            force="true"
+        />
+    </php>
 </phpunit>
