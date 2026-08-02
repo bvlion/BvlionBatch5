@@ -11,7 +11,7 @@
     </testsuites>
     <php>
         <env name="APP_TIMEZONE" value="Asia/Tokyo" force="true"/>
-        <env name="DB_HOST" value="database.example.test" force="true"/>
+        <env name="DB_HOST" value="database" force="true"/>
         <env name="DB_PORT" value="3306" force="true"/>
         <env name="DB_NAME" value="example_database" force="true"/>
         <env name="DB_USER" value="example_database_user" force="true"/>

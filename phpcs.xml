@@ -7,7 +7,9 @@
     <arg value="p"/>
 
     <file>bootstrap</file>
+    <file>bin</file>
     <file>public</file>
+    <file>src/Database</file>
     <file>tests</file>
 
     <rule ref="PSR12"/>

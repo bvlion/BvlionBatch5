@@ -19,7 +19,7 @@ final class ConfigurationTest extends TestCase
                     'timezone' => 'Asia/Tokyo',
                 ],
                 'database' => [
-                    'host' => 'database.example.test',
+                    'host' => 'database',
                     'port' => '3306',
                     'name' => 'example_database',
                     'user' => 'example_database_user',
