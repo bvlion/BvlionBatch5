@@ -12,6 +12,11 @@
         "phpunit/phpunit": "^13.2",
         "squizlabs/php_codesniffer": "^4.0"
     },
+    "autoload": {
+        "psr-4": {
+            "BvlionBatch5\\": "src/"
+        }
+    },
     "config": {
         "platform": {
             "php": "8.5.5"
@@ -22,6 +27,8 @@
             "@php -l bootstrap/config.php",
             "@php -l bootstrap/app.php",
             "@php -l public/index.php",
+            "@php -l src/Middleware/BearerTokenMiddleware.php",
+            "@php -l tests/BearerTokenMiddlewareTest.php",
             "@php -l tests/ConfigurationTest.php",
             "@php -l tests/NotFoundRouteTest.php"
         ],

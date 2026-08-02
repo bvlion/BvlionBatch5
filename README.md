@@ -44,6 +44,18 @@ cp .env.example .env
 
 すべての環境変数が必須です。本番値は`.env`または実行環境の環境変数で注入し、コミットしません。設定が未指定または空の場合は、秘密値を含めず、該当する環境変数名を示してリクエスト処理を失敗させます。
 
+## API認証
+
+認証対象ルートと使用するBearer Tokenは次のとおりです。
+
+| ルート | 環境変数 |
+| --- | --- |
+| `POST /api/mail/process` | `SCHEDULER_BEARER_TOKEN` |
+| `POST /api/dating/notify` | `SCHEDULER_BEARER_TOKEN` |
+| `POST /api/overtime/notify` | `OVERTIME_BEARER_TOKEN` |
+
+各ルートの実装時に`BearerTokenMiddleware`をルートミドルウェアとして登録し、`Authorization: Bearer <token>`ヘッダーを検証します。ヘッダーが未指定、形式不正、またはトークンが一致しない場合は、トークン値をレスポンスへ含めずHTTP 401を返します。
+
 ## ローカル実行
 
 ローカルPCにはDockerのみ必要です。PHPとComposerをローカルPCへインストールする必要はありません。
