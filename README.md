@@ -44,6 +44,25 @@ cp .env.example .env
 
 すべての環境変数が必須です。本番値は`.env`または実行環境の環境変数で注入し、コミットしません。設定が未指定または空の場合は、秘密値を含めず、該当する環境変数名を示してリクエスト処理を失敗させます。
 
+## データベースとマイグレーション
+
+ローカル開発ではMySQL 5.7コンテナを使用します。データベースを起動し、未適用のマイグレーションを適用します。
+
+```shell
+docker compose up --detach database
+docker compose run --rm app composer migrate
+```
+
+マイグレーションSQLは`database/migrations`へ`YYYYMMDDHHMMSS_description.sql`形式で配置します。ファイル名の昇順で適用し、適用済みファイル名を`schema_migrations`テーブルへ記録するため、同じコマンドを再実行できます。
+
+本番環境では、環境変数と依存関係を設定した後、XServerのPHP 8.5.5を明示して適用します。
+
+```shell
+/opt/php-8.5.5/bin/php bin/migrate.php
+```
+
+本番データ、データベースダンプ、個人情報、秘密情報はリポジトリへ配置しません。`dating`、`mail_api`、設定、メール処理履歴の各テーブルは、対応する後続Issueでマイグレーションを追加します。
+
 ## API認証
 
 認証対象ルートと使用するBearer Tokenは次のとおりです。

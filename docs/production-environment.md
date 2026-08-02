@@ -24,6 +24,10 @@
 | `json` | 利用可 | 利用可 |
 | `curl` | 利用可 | 利用可 |
 
+## MySQL
+
+- 本番データベースにはMySQL 5.7系を使用する。
+
 ## Composer
 
 - Composer 2系を利用できる。

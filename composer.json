@@ -3,6 +3,8 @@
     "description": "HTTP APIs migrated from the previous batch environments",
     "type": "project",
     "require": {
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
         "php": "^8.5",
         "slim/psr7": "^1.8",
         "slim/slim": "^4.15",
@@ -23,13 +25,17 @@
         }
     },
     "scripts": {
+        "migrate": "@php bin/migrate.php",
         "lint": [
+            "@php -l bin/migrate.php",
             "@php -l bootstrap/config.php",
             "@php -l bootstrap/app.php",
             "@php -l public/index.php",
+            "@php -l src/Database/ConnectionFactory.php",
             "@php -l src/Middleware/BearerTokenMiddleware.php",
             "@php -l tests/BearerTokenMiddlewareTest.php",
             "@php -l tests/ConfigurationTest.php",
+            "@php -l tests/DatabaseConnectionTest.php",
             "@php -l tests/NotFoundRouteTest.php"
         ],
         "style": "phpcs",
