@@ -51,6 +51,7 @@ final class MimeMessageDecoder
 
     /**
      * @param callable(string): (string|false) $bodyFetcher
+     *        IMAPのsection番号（例: 1、1.2）を受け取ります。
      */
     public function decodeBody(
         stdClass $structure,
@@ -58,7 +59,7 @@ final class MimeMessageDecoder
     ): string {
         $body = $this->findPlainTextBody(
             $structure,
-            '',
+            (int) ($structure->type ?? -1) === TYPEMULTIPART ? '' : '1',
             $bodyFetcher,
         );
 

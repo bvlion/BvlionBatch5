@@ -42,8 +42,11 @@ final class MimeMessageDecoderTest extends TestCase
 
         $body = (new MimeMessageDecoder())->decodeBody(
             $structure,
-            static fn (string $partNumber): string =>
-                quoted_printable_encode($sourceBody),
+            static function (string $partNumber) use ($sourceBody): string {
+                self::assertSame('1', $partNumber);
+
+                return quoted_printable_encode($sourceBody);
+            },
         );
 
         self::assertSame('Example café body.', $body);
@@ -83,14 +86,23 @@ final class MimeMessageDecoderTest extends TestCase
             '1.1' => '<p>Example HTML body.</p>',
             '1.2' => base64_encode('Example plain body.'),
         ];
+        $fetchedPartNumbers = [];
 
         $body = (new MimeMessageDecoder())->decodeBody(
             $structure,
-            static fn (string $partNumber): string|false =>
-                $partBodies[$partNumber] ?? false,
+            static function (string $partNumber) use (
+                &$fetchedPartNumbers,
+                $partBodies,
+            ): string {
+                self::assertArrayHasKey($partNumber, $partBodies);
+                $fetchedPartNumbers[] = $partNumber;
+
+                return $partBodies[$partNumber];
+            },
         );
 
         self::assertSame('Example plain body.', $body);
+        self::assertSame(['1.2'], $fetchedPartNumbers);
     }
 
     public function testHtmlOnlyReturnsEmptyBody(): void
@@ -111,6 +123,49 @@ final class MimeMessageDecoderTest extends TestCase
                 $bodyFetcher,
             ),
         );
+    }
+
+    public function testDeeplyNestedMultipartUsesImapSectionNumber(): void
+    {
+        $structure = (object) [
+            'type' => TYPEMULTIPART,
+            'subtype' => 'MIXED',
+            'parts' => [
+                (object) [
+                    'type' => TYPETEXT,
+                    'subtype' => 'HTML',
+                    'encoding' => ENC7BIT,
+                ],
+                (object) [
+                    'type' => TYPEMULTIPART,
+                    'subtype' => 'MIXED',
+                    'parts' => [
+                        (object) [
+                            'type' => TYPEMULTIPART,
+                            'subtype' => 'ALTERNATIVE',
+                            'parts' => [
+                                (object) [
+                                    'type' => TYPETEXT,
+                                    'subtype' => 'PLAIN',
+                                    'encoding' => ENC7BIT,
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $body = (new MimeMessageDecoder())->decodeBody(
+            $structure,
+            static function (string $partNumber): string {
+                self::assertSame('2.1.1', $partNumber);
+
+                return 'Example deeply nested body.';
+            },
+        );
+
+        self::assertSame('Example deeply nested body.', $body);
     }
 
     public function testTextAttachmentIsNotUsedAsBody(): void
