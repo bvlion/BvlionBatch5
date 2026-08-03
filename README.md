@@ -149,7 +149,7 @@ HTTP Shortcutsから`POST /api/overtime/notify`を呼び出し、`Authorization:
 
 `mail_api`テーブルの`enable_flag = 1`であるルールを取得し、`target_from`をINBOX内の送信者または件名へ、大文字小文字を区別せず部分一致させます。検索結果としてメッセージのUIDとINBOXのUIDVALIDITYだけを返し、送信者、件名、本文はログや検索結果へ含めません。
 
-ローカルのappコンテナにはPECL IMAP 1.0.3を導入します。IMAP over SSL/TLSのポート993を使用し、INBOXは読み取り専用で参照します。
+ローカルのappコンテナにはPECL IMAP 1.0.3を導入します。IMAP over SSL/TLSのポート993を使用します。手動疎通確認ではINBOXを読み取り専用で参照し、メール処理APIではSlack投稿が成功するまで既読化しません。
 
 ローカルから実IMAPへの疎通を確認する場合は、Git管理対象外の`.env`へIMAP用の4つの環境変数を設定し、Docker経由で次を実行します。
 
@@ -175,6 +175,28 @@ docker compose run --rm --no-deps app php bin/check-imap.php
 メール処理履歴は、個人情報を含まないメールボックス識別子、UIDVALIDITY、UIDの組み合わせで一意に管理します。Slack投稿済みと処理完了を別に記録し、Slack投稿後にメール移動だけ失敗した場合は、保存済みのSlackのtimestampを使って再投稿せず移動だけを再試行できる状態にします。件名、本文、送信者、メールアドレスは保存しません。
 
 完了済み履歴は完了から90日を過ぎたものだけを削除対象とします。Slack投稿済み・移動未完了の履歴は、二重投稿防止のため完了するまで自動削除しません。
+
+## メール処理API
+
+`mail_api`テーブルでは、有効なメール処理ルールを次の列で管理します。
+
+| 列 | 用途 |
+| --- | --- |
+| `target_from` | 送信者または件名へ部分一致させる文字列 |
+| `to_folder` | INBOXからの移動先フォルダ |
+| `channel_id` | 投稿先のSlackチャンネルID |
+| `enable_flag` | ルールの有効状態 |
+
+`POST /api/mail/process`は、有効なルールを登録順に処理します。対象メールの件名と`text/plain`本文を整形してSlackへ投稿し、投稿成功後に既読化して指定フォルダへ移動し、INBOXから削除します。Slack投稿に失敗したメールは移動しません。Slack投稿後の移動に失敗した場合は、処理履歴に基づいて次回の実行時にSlackへ再投稿せず、既読化と移動だけを再試行します。
+
+処理はHTTPリクエスト内で同期実行し、Bearer Tokenには`SCHEDULER_BEARER_TOKEN`を使用します。応答はHTTP 200のJSONで、全メールの処理結果と失敗件数を返します。
+
+```json
+{
+  "success": true,
+  "failure_count": 0
+}
+```
 
 ## ローカル実行
 
