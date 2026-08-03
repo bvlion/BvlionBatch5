@@ -151,6 +151,14 @@ HTTP Shortcutsから`POST /api/overtime/notify`を呼び出し、`Authorization:
 
 ローカルのappコンテナにはPECL IMAP 1.0.3を導入します。IMAP over SSL/TLSのポート993を使用し、INBOXは読み取り専用で参照します。
 
+ローカルから実IMAPへの疎通を確認する場合は、Git管理対象外の`.env`へIMAP用の4つの環境変数を設定し、Docker経由で次を実行します。
+
+```shell
+docker compose run --rm --no-deps app php bin/check-imap.php
+```
+
+このコマンドによる実IMAP接続は読み取り専用であり、メールの既読化、移動、削除を行いません。
+
 本番接続を確認する場合は、Git管理対象外の`.env`または実行環境へIMAP用の4つの環境変数だけを設定し、XServerのPHP 8.5.5を明示して次を実行します。
 
 ```shell

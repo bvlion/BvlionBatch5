@@ -7,9 +7,10 @@ RUN apt-get update \
         git \
         libc-client-dev \
         libkrb5-dev \
+        libonig-dev \
         libssl-dev \
         unzip \
-    && docker-php-ext-install pdo_mysql \
+    && docker-php-ext-install mbstring pdo_mysql \
     && pecl install imap-1.0.3 \
     && docker-php-ext-enable imap \
     && rm -rf /var/lib/apt/lists/*

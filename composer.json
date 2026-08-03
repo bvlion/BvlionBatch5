@@ -5,6 +5,7 @@
     "require": {
         "ext-curl": "*",
         "ext-imap": "*",
+        "ext-mbstring": "*",
         "ext-pdo": "*",
         "ext-pdo_mysql": "*",
         "guzzlehttp/guzzle": "^7.15",
@@ -39,6 +40,7 @@
             "@php -l src/Database/ConnectionFactory.php",
             "@php -l src/Dating/DatingNotificationService.php",
             "@php -l src/Dating/DatingRepository.php",
+            "@php -l src/Mail/ImapConnectivityCheckCommand.php",
             "@php -l src/Mail/ImapMailbox.php",
             "@php -l src/Mail/MailRuleRepository.php",
             "@php -l src/Mail/MailSearchService.php",
@@ -52,6 +54,7 @@
             "@php -l tests/DatabaseConnectionTest.php",
             "@php -l tests/DatingNotificationRouteTest.php",
             "@php -l tests/DatingNotificationServiceTest.php",
+            "@php -l tests/ImapConnectivityCheckCommandTest.php",
             "@php -l tests/MailSearchServiceTest.php",
             "@php -l tests/NotFoundRouteTest.php",
             "@php -l tests/OvertimeNotificationRouteTest.php",
