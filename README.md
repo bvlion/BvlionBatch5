@@ -168,6 +168,8 @@ docker compose run --rm --no-deps app php bin/check-imap.php
 
 成功時は`IMAP connectivity check succeeded.`だけを出力します。接続、検索、フォルダ参照に失敗した場合は、メールサーバー、アカウント、フォルダ、メールの実値を含めず、それぞれ異なるエラーで終了コード1を返します。この確認はメールの移動、削除、既読化を行いません。
 
+メール件名はMIMEエンコードと文字コードを処理してUTF-8へ変換します。本文はmultipartを再帰的に探索し、quoted-printableまたはbase64をデコードした`text/plain`を優先して取得します。ファイル名または添付指定があるパートは本文として扱いません。HTMLしかないメールは本文を空文字とし、取得する本文はSlack投稿で推奨される長さに合わせて先頭4,000文字へ制限します。
+
 ## ローカル実行
 
 ローカルPCにはDockerのみ必要です。PHPとComposerをローカルPCへインストールする必要はありません。
