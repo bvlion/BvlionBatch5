@@ -6,6 +6,7 @@ namespace BvlionBatch5\Tests;
 
 use BvlionBatch5\Mail\MimeMessageDecoder;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 final class MimeMessageDecoderTest extends TestCase
 {
@@ -123,6 +124,33 @@ final class MimeMessageDecoderTest extends TestCase
                 $bodyFetcher,
             ),
         );
+    }
+
+    public function testBodyFetchFailureIsNotTreatedAsEmptyBody(): void
+    {
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'PLAIN',
+            'encoding' => ENC7BIT,
+        ];
+        $decoder = new MimeMessageDecoder();
+
+        try {
+            $decoder->decodeBody(
+                $structure,
+                static function (string $partNumber): false {
+                    self::assertSame('1', $partNumber);
+
+                    return false;
+                },
+            );
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'IMAP message body fetch failed.',
+                $exception->getMessage(),
+            );
+        }
     }
 
     public function testDeeplyNestedMultipartUsesImapSectionNumber(): void

@@ -267,12 +267,35 @@ class ImapMailbox
             throw new RuntimeException('IMAP message update failed.');
         }
 
+        imap_errors();
+        imap_alerts();
+
         @imap_setflag_full(
             $this->connection,
             (string) $uid,
             '\\Seen',
             ST_UID,
         );
+
+        $updateErrors = imap_errors();
+        imap_alerts();
+        $overview = @imap_fetch_overview(
+            $this->connection,
+            (string) $uid,
+            FT_UID,
+        );
+        $verificationErrors = imap_errors();
+        imap_alerts();
+
+        if (
+            is_array($updateErrors)
+            || is_array($verificationErrors)
+            || $overview === false
+            || !isset($overview[0])
+            || (int) ($overview[0]->seen ?? 0) !== 1
+        ) {
+            throw new RuntimeException('IMAP message update failed.');
+        }
     }
 
     public function moveMessage(int $uid, string $toFolder): void

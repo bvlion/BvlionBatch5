@@ -38,6 +38,7 @@ namespace BvlionBatch5\Mail {
 
 namespace BvlionBatch5\Tests {
     use BvlionBatch5\Mail\ImapMailbox;
+    use BvlionBatch5\Mail\MimeMessageDecoder;
     use PHPUnit\Framework\TestCase;
     use RuntimeException;
 
@@ -164,6 +165,51 @@ namespace BvlionBatch5\Tests {
                     $exception->getMessage(),
                 );
             }
+        }
+
+        public function testReadMessageWithoutConnectionFailsSafely(): void
+        {
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('IMAP message read failed.');
+
+            $mailbox->readMessage(101, new MimeMessageDecoder());
+        }
+
+        public function testMarkMessageAsSeenWithoutConnectionFailsSafely(): void
+        {
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('IMAP message update failed.');
+
+            $mailbox->markMessageAsSeen(101);
+        }
+
+        public function testMoveMessageWithoutConnectionFailsSafely(): void
+        {
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('IMAP message move failed.');
+
+            $mailbox->moveMessage(101, 'ExampleArchive');
         }
     }
 }

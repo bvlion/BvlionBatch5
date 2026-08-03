@@ -265,6 +265,192 @@ final class MailProcessingServiceTest extends TestCase
         );
     }
 
+    public function testBodyFetchFailureDoesNotProcessMessageAndContinues(): void
+    {
+        $mailRuleRepository = $this->createStub(MailRuleRepository::class);
+        $mailRuleRepository->method('findEnabledRules')->willReturn([
+            [
+                'target_from' => 'example-sender',
+                'to_folder' => 'ExampleArchive',
+                'channel_id' => 'C0000000000',
+            ],
+        ]);
+        $mailbox = $this->createMock(ImapMailbox::class);
+        $mailbox->expects(self::once())->method('connect');
+        $mailbox->method('getUidValidity')->willReturn(123456);
+        $mailbox->method('searchMessages')->willReturn([
+            [
+                'uid' => 101,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example first message.',
+            ],
+            [
+                'uid' => 102,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example second message.',
+            ],
+        ]);
+        $mailbox
+            ->expects(self::exactly(2))
+            ->method('readMessage')
+            ->willReturnCallback(
+                static function (
+                    int $uid,
+                    MimeMessageDecoder $decoder,
+                ): array {
+                    self::assertInstanceOf(
+                        MimeMessageDecoder::class,
+                        $decoder,
+                    );
+
+                    if ($uid === 101) {
+                        throw new RuntimeException(
+                            'IMAP message body fetch failed.',
+                        );
+                    }
+
+                    self::assertSame(102, $uid);
+
+                    return [
+                        'subject' => 'Example successful subject.',
+                        'body' => 'Example successful body.',
+                    ];
+                },
+            );
+        $mailbox
+            ->expects(self::once())
+            ->method('markMessageAsSeen')
+            ->with(102);
+        $mailbox
+            ->expects(self::once())
+            ->method('moveMessage')
+            ->with(102, 'ExampleArchive');
+        $mailbox->expects(self::once())->method('disconnect');
+        $historyRepository = $this->createMock(
+            MailProcessingHistoryRepository::class,
+        );
+        $historyRepository
+            ->expects(self::exactly(2))
+            ->method('find')
+            ->willReturn(null);
+        $historyRepository
+            ->expects(self::once())
+            ->method('recordSlackPosted')
+            ->with(
+                'example-mailbox',
+                123456,
+                102,
+                '1234567890.123456',
+            );
+        $historyRepository
+            ->expects(self::once())
+            ->method('markCompleted')
+            ->with('example-mailbox', 123456, 102);
+        $requestHistory = [];
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                '{"ok":true,"ts":"1234567890.123456"}',
+            ),
+        ]);
+        $handlerStack = HandlerStack::create($mockHandler);
+        $handlerStack->push(Middleware::history($requestHistory));
+        $service = new MailProcessingService(
+            $mailRuleRepository,
+            $mailbox,
+            new MimeMessageDecoder(),
+            $historyRepository,
+            new SlackClient(
+                new Client(['handler' => $handlerStack]),
+                'xoxb-example-bot-token',
+            ),
+            'example-mailbox',
+        );
+
+        self::assertSame(
+            ['success' => false, 'failure_count' => 1],
+            $service->process(),
+        );
+        self::assertCount(1, $requestHistory);
+    }
+
+    public function testSeenFailureKeepsSlackPostedHistoryIncomplete(): void
+    {
+        $mailRuleRepository = $this->createStub(MailRuleRepository::class);
+        $mailRuleRepository->method('findEnabledRules')->willReturn([
+            [
+                'target_from' => 'example-sender',
+                'to_folder' => 'ExampleArchive',
+                'channel_id' => 'C0000000000',
+            ],
+        ]);
+        $mailbox = $this->createMock(ImapMailbox::class);
+        $mailbox->expects(self::once())->method('connect');
+        $mailbox->method('getUidValidity')->willReturn(123456);
+        $mailbox->method('searchMessages')->willReturn([
+            [
+                'uid' => 101,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example received message.',
+            ],
+        ]);
+        $mailbox->method('readMessage')->willReturn([
+            'subject' => 'Example subject.',
+            'body' => 'Example body.',
+        ]);
+        $mailbox
+            ->expects(self::once())
+            ->method('markMessageAsSeen')
+            ->with(101)
+            ->willThrowException(
+                new RuntimeException('IMAP message update failed.'),
+            );
+        $mailbox->expects(self::never())->method('moveMessage');
+        $mailbox->expects(self::once())->method('disconnect');
+        $historyRepository = $this->createMock(
+            MailProcessingHistoryRepository::class,
+        );
+        $historyRepository->method('find')->willReturn(null);
+        $historyRepository
+            ->expects(self::once())
+            ->method('recordSlackPosted')
+            ->with(
+                'example-mailbox',
+                123456,
+                101,
+                '1234567890.123456',
+            );
+        $historyRepository->expects(self::never())->method('markCompleted');
+        $requestHistory = [];
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                '{"ok":true,"ts":"1234567890.123456"}',
+            ),
+        ]);
+        $handlerStack = HandlerStack::create($mockHandler);
+        $handlerStack->push(Middleware::history($requestHistory));
+        $service = new MailProcessingService(
+            $mailRuleRepository,
+            $mailbox,
+            new MimeMessageDecoder(),
+            $historyRepository,
+            new SlackClient(
+                new Client(['handler' => $handlerStack]),
+                'xoxb-example-bot-token',
+            ),
+            'example-mailbox',
+        );
+
+        self::assertSame(
+            ['success' => false, 'failure_count' => 1],
+            $service->process(),
+        );
+        self::assertCount(1, $requestHistory);
+    }
+
     public function testMoveFailureKeepsSlackPostedHistoryIncomplete(): void
     {
         $mailRuleRepository = $this->createStub(MailRuleRepository::class);
@@ -352,7 +538,10 @@ final class MailProcessingServiceTest extends TestCase
             ],
         ]);
         $mailbox->expects(self::never())->method('readMessage');
-        $mailbox->expects(self::never())->method('markMessageAsSeen');
+        $mailbox
+            ->expects(self::once())
+            ->method('markMessageAsSeen')
+            ->with(101);
         $mailbox
             ->expects(self::once())
             ->method('moveMessage')

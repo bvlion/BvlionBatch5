@@ -93,11 +93,9 @@ final class MailProcessingService
                                 $message['uid'],
                                 $slackTimestamp,
                             );
-                            $this->mailbox->markMessageAsSeen(
-                                $message['uid'],
-                            );
                         }
 
+                        $this->mailbox->markMessageAsSeen($message['uid']);
                         $this->mailbox->moveMessage(
                             $message['uid'],
                             $rule['to_folder'],
