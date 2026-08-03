@@ -28,7 +28,7 @@ class ImapMailbox
         );
     }
 
-    public function connect(): void
+    public function connect(bool $shouldIncludeDiagnostics = false): void
     {
         imap_errors();
         imap_alerts();
@@ -42,8 +42,78 @@ class ImapMailbox
         );
 
         if ($connection === false) {
+            $errors = imap_errors();
+            $alerts = imap_alerts();
+
             imap_errors();
             imap_alerts();
+
+            if ($shouldIncludeDiagnostics) {
+                $diagnostics = [];
+
+                foreach ([$errors, $alerts] as $messages) {
+                    if (!is_array($messages)) {
+                        continue;
+                    }
+
+                    foreach ($messages as $message) {
+                        $message = trim((string) $message);
+
+                        if ($message === '') {
+                            continue;
+                        }
+
+                        $safeDiagnostic = match (true) {
+                            preg_match(
+                                '~no such host|name or service not known|'
+                                . 'name resolution|getaddrinfo|'
+                                . 'nodename nor servname~i',
+                                $message,
+                            ) === 1 => 'Host resolution failed.',
+                            preg_match(
+                                '~ssl|tls|certificate|x509~i',
+                                $message,
+                            ) === 1 => 'TLS negotiation or certificate '
+                                . 'validation failed.',
+                            preg_match(
+                                '~auth|login|credential|password|username~i',
+                                $message,
+                            ) === 1 => 'Authentication failed.',
+                            preg_match(
+                                '~timed?\s*out|timeout~i',
+                                $message,
+                            ) === 1 => 'Network connection timed out.',
+                            preg_match(
+                                '~connection refused|refused connection~i',
+                                $message,
+                            ) === 1 => 'Network connection was refused.',
+                            preg_match(
+                                '~network|connect|socket|stream|host~i',
+                                $message,
+                            ) === 1 => 'Network connection failed.',
+                            default => 'IMAP server returned an error.',
+                        };
+
+                        if (
+                            $safeDiagnostic !== ''
+                            && !in_array(
+                                $safeDiagnostic,
+                                $diagnostics,
+                                true,
+                            )
+                        ) {
+                            $diagnostics[] = $safeDiagnostic;
+                        }
+                    }
+                }
+
+                if ($diagnostics !== []) {
+                    throw new RuntimeException(
+                        "IMAP connection failed.\nIMAP diagnostics: "
+                        . implode(' | ', $diagnostics),
+                    );
+                }
+            }
 
             throw new RuntimeException('IMAP connection failed.');
         }

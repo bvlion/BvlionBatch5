@@ -13,6 +13,7 @@ final class ImapConnectivityCheckCommand
         ?string $port,
         ?string $username,
         ?string $password,
+        ?ImapMailbox $mailbox = null,
     ): void {
         if ($host === null || trim($host) === '') {
             throw new RuntimeException('IMAP_HOST is required.');
@@ -47,7 +48,7 @@ final class ImapConnectivityCheckCommand
             throw new RuntimeException('IMAP_PASSWORD is required.');
         }
 
-        $mailbox = new ImapMailbox(
+        $mailbox ??= new ImapMailbox(
             $host,
             $validatedPort,
             $username,
@@ -55,10 +56,10 @@ final class ImapConnectivityCheckCommand
         );
 
         try {
-            $mailbox->connect();
+            $mailbox->connect(true);
             $mailbox->getUidValidity();
             $mailbox->searchMessages();
-            fwrite(STDOUT, "IMAP connectivity check succeeded.\n");
+            echo "IMAP connectivity check succeeded.\n";
         } finally {
             $mailbox->disconnect();
         }
