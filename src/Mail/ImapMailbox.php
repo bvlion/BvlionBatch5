@@ -11,7 +11,8 @@ class ImapMailbox
 {
     private const FOLDER = 'INBOX';
 
-    private ?Connection $connection = null;
+    /** @var Connection|null */
+    private ?object $connection = null;
     private string $mailbox;
 
     public function __construct(
@@ -304,21 +305,29 @@ class ImapMailbox
             throw new RuntimeException('IMAP message move failed.');
         }
 
+        imap_errors();
+        imap_alerts();
+
         $moved = @imap_mail_move(
             $this->connection,
             (string) $uid,
             self::FOLDER . '.' . $toFolder,
             CP_UID,
         );
+        $moveErrors = imap_errors();
+        imap_alerts();
 
-        if ($moved === false) {
-            imap_errors();
-            imap_alerts();
-
+        if ($moved === false || is_array($moveErrors)) {
             throw new RuntimeException('IMAP message move failed.');
         }
 
         @imap_expunge($this->connection);
+        $expungeErrors = imap_errors();
+        imap_alerts();
+
+        if (is_array($expungeErrors)) {
+            throw new RuntimeException('IMAP message move failed.');
+        }
     }
 
     public function disconnect(): void

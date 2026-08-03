@@ -451,7 +451,7 @@ final class MailProcessingServiceTest extends TestCase
         self::assertCount(1, $requestHistory);
     }
 
-    public function testMoveFailureKeepsSlackPostedHistoryIncomplete(): void
+    public function testExpungeFailureKeepsSlackPostedHistoryIncomplete(): void
     {
         $mailRuleRepository = $this->createStub(MailRuleRepository::class);
         $mailRuleRepository->method('findEnabledRules')->willReturn([
