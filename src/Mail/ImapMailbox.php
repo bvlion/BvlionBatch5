@@ -1,0 +1,153 @@
+<?php
+
+declare(strict_types=1);
+
+namespace BvlionBatch5\Mail;
+
+use IMAP\Connection;
+use RuntimeException;
+
+class ImapMailbox
+{
+    private const FOLDER = 'INBOX';
+
+    private ?Connection $connection = null;
+    private string $mailbox;
+
+    public function __construct(
+        private string $host,
+        private int $port,
+        private string $username,
+        private string $password,
+    ) {
+        $this->mailbox = sprintf(
+            '{%s:%d/imap/ssl}%s',
+            $this->host,
+            $this->port,
+            self::FOLDER,
+        );
+    }
+
+    public function connect(): void
+    {
+        imap_errors();
+        imap_alerts();
+
+        $connection = @imap_open(
+            $this->mailbox,
+            $this->username,
+            $this->password,
+            OP_READONLY,
+            1,
+        );
+
+        if ($connection === false) {
+            imap_errors();
+            imap_alerts();
+
+            throw new RuntimeException('IMAP connection failed.');
+        }
+
+        $this->connection = $connection;
+    }
+
+    public function getUidValidity(): int
+    {
+        if ($this->connection === null) {
+            throw new RuntimeException('IMAP folder reference failed.');
+        }
+
+        $status = @imap_status(
+            $this->connection,
+            $this->mailbox,
+            SA_UIDVALIDITY,
+        );
+
+        if (
+            $status === false
+            || !isset($status->uidvalidity)
+            || (int) $status->uidvalidity <= 0
+        ) {
+            imap_errors();
+            imap_alerts();
+
+            throw new RuntimeException('IMAP folder reference failed.');
+        }
+
+        return (int) $status->uidvalidity;
+    }
+
+    /**
+     * @return list<array{uid: int, sender: string, subject: string}>
+     */
+    public function searchMessages(): array
+    {
+        if ($this->connection === null) {
+            throw new RuntimeException('IMAP search failed.');
+        }
+
+        $messageCount = @imap_num_msg($this->connection);
+
+        if ($messageCount === false) {
+            imap_errors();
+            imap_alerts();
+
+            throw new RuntimeException('IMAP search failed.');
+        }
+
+        if ($messageCount === 0) {
+            return [];
+        }
+
+        $messageUids = @imap_search(
+            $this->connection,
+            'ALL',
+            SE_UID,
+        );
+
+        if ($messageUids === false) {
+            imap_errors();
+            imap_alerts();
+
+            throw new RuntimeException('IMAP search failed.');
+        }
+
+        $messages = [];
+
+        foreach ($messageUids as $messageUid) {
+            $overview = @imap_fetch_overview(
+                $this->connection,
+                (string) $messageUid,
+                FT_UID,
+            );
+
+            if ($overview === false || !isset($overview[0])) {
+                imap_errors();
+                imap_alerts();
+
+                throw new RuntimeException('IMAP search failed.');
+            }
+
+            $messages[] = [
+                'uid' => (int) $messageUid,
+                'sender' => imap_utf8((string) ($overview[0]->from ?? '')),
+                'subject' => imap_utf8(
+                    (string) ($overview[0]->subject ?? ''),
+                ),
+            ];
+        }
+
+        return $messages;
+    }
+
+    public function disconnect(): void
+    {
+        if ($this->connection !== null) {
+            @imap_close($this->connection);
+            $this->connection = null;
+        }
+
+        imap_errors();
+        imap_alerts();
+    }
+}

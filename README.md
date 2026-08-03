@@ -145,6 +145,20 @@ HTTP Shortcutsから`POST /api/overtime/notify`を呼び出し、`Authorization:
 
 設定がない場合はHTTP 500、Slack投稿に失敗した場合はHTTP 502で、秘密値を含まないJSONエラーを返します。
 
+## メール検索
+
+`mail_api`テーブルの`enable_flag = 1`であるルールを取得し、`target_from`をINBOX内の送信者または件名へ、大文字小文字を区別せず部分一致させます。検索結果としてメッセージのUIDとINBOXのUIDVALIDITYだけを返し、送信者、件名、本文はログや検索結果へ含めません。
+
+ローカルのappコンテナにはPECL IMAP 1.0.3を導入します。IMAP over SSL/TLSのポート993を使用し、INBOXは読み取り専用で参照します。
+
+本番接続を確認する場合は、Git管理対象外の`.env`または実行環境へIMAP用の4つの環境変数だけを設定し、XServerのPHP 8.5.5を明示して次を実行します。
+
+```shell
+/opt/php-8.5.5/bin/php bin/check-imap.php
+```
+
+成功時は`IMAP connectivity check succeeded.`だけを出力します。接続、検索、フォルダ参照に失敗した場合は、メールサーバー、アカウント、フォルダ、メールの実値を含めず、それぞれ異なるエラーで終了コード1を返します。この確認はメールの移動、削除、既読化を行いません。
+
 ## ローカル実行
 
 ローカルPCにはDockerのみ必要です。PHPとComposerをローカルPCへインストールする必要はありません。
