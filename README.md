@@ -263,32 +263,57 @@ GitHub Actions化が必要になった場合は、別Issueとして扱います�
     git clone https://github.com/bvlion/BvlionBatch5.git .
     ```
 
-2. 専用のComposerを、検証済みチェックサムでBvlionBatch5専用の非公開ツールディレクトリへ配置します。共有Composerは使用・更新しません。Composerの公式インストーラー検証手順に沿って、ダウンロード・SHA-384検証・インストール・後始末を1つのスクリプトで実行します。チェックサムが一致しない場合は、`composer-setup.php`を削除したうえで必ず非ゼロの終了コードで停止し、インストールへは進みません。
+2. 専用のComposerを、検証済みチェックサムでBvlionBatch5専用の非公開ツールディレクトリへ配置します。共有Composerは使用・更新しません。Composerの公式インストーラー検証手順に沿って、ダウンロード・SHA-384検証・インストール・後始末を1つのスクリプトで実行します。処理全体をサブシェル`( ... )`で囲んでいるため、途中で失敗しても現在のSSH接続(親シェル)は終了しません。ツールディレクトリの絶対パスは、貼り付け後の対話プロンプトで入力します(コマンド内に埋め込みません)。
 
     ```shell
-    mkdir -p <tools-directory>
-    cd <tools-directory>
+    (
+        set -euo pipefail
 
-    EXPECTED_SIGNATURE="$(/opt/php-8.5.5/bin/php -r "echo file_get_contents('https://composer.github.io/installer.sig');")"
-    /opt/php-8.5.5/bin/php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
-    ACTUAL_SIGNATURE="$(/opt/php-8.5.5/bin/php -r "echo hash_file('sha384', 'composer-setup.php');")"
+        read -rp "Composerを配置する専用ツールディレクトリの絶対パスを入力してEnter: " TOOLS_DIRECTORY
+        mkdir -p "$TOOLS_DIRECTORY"
+        cd "$TOOLS_DIRECTORY"
 
-    if [ "$EXPECTED_SIGNATURE" != "$ACTUAL_SIGNATURE" ]; then
-        echo 'ERROR: Composer installer signature mismatch.' >&2
-        rm -f composer-setup.php
-        exit 1
+        COMPOSER_SETUP_FILE="composer-setup.php"
+        trap 'rm -f "$COMPOSER_SETUP_FILE"' EXIT
+
+        EXPECTED_SIGNATURE="$(/opt/php-8.5.5/bin/php -r "echo file_get_contents('https://composer.github.io/installer.sig');")"
+        if [ -z "$EXPECTED_SIGNATURE" ]; then
+            echo 'ERROR: Could not retrieve the expected Composer installer signature.' >&2
+            exit 1
+        fi
+
+        if ! /opt/php-8.5.5/bin/php -r "exit(copy('https://getcomposer.org/installer', '$COMPOSER_SETUP_FILE') ? 0 : 1);"; then
+            echo 'ERROR: Could not download the Composer installer.' >&2
+            exit 1
+        fi
+
+        if [ ! -f "$COMPOSER_SETUP_FILE" ]; then
+            echo 'ERROR: Composer installer file is missing after download.' >&2
+            exit 1
+        fi
+
+        ACTUAL_SIGNATURE="$(/opt/php-8.5.5/bin/php -r "echo hash_file('sha384', '$COMPOSER_SETUP_FILE');")"
+        if [ -z "$ACTUAL_SIGNATURE" ]; then
+            echo 'ERROR: Could not compute the Composer installer signature.' >&2
+            exit 1
+        fi
+
+        if [ "$EXPECTED_SIGNATURE" != "$ACTUAL_SIGNATURE" ]; then
+            echo 'ERROR: Composer installer signature mismatch.' >&2
+            exit 1
+        fi
+
+        /opt/php-8.5.5/bin/php "$COMPOSER_SETUP_FILE" --install-dir="$TOOLS_DIRECTORY" --filename=composer.phar
+    )
+    COMPOSER_SETUP_STATUS=$?
+    if [ "$COMPOSER_SETUP_STATUS" -ne 0 ]; then
+        echo 'Composer setup failed. See the error above before continuing.' >&2
     fi
-
-    /opt/php-8.5.5/bin/php composer-setup.php --install-dir=<tools-directory> --filename=composer.phar
-    RESULT=$?
-    rm -f composer-setup.php
-    unset EXPECTED_SIGNATURE ACTUAL_SIGNATURE
-    exit $RESULT
     ```
 
-    署名不一致時は`ERROR: Composer installer signature mismatch.`を表示して終了コード1で停止し、`composer-setup.php`は削除されます。この場合は`composer.phar`をインストールせず、原因を確認してから再実行してください。
+    `trap`により、成功・失敗のいずれでも`composer-setup.php`は削除されます。署名取得失敗、ダウンロード失敗、ファイル不在、署名計算失敗、署名不一致、Composerインストール失敗のいずれかが起きた場合はサブシェル内で非ゼロの終了コードとなり、インストールへは進みません。`COMPOSER_SETUP_STATUS`が`0`であることを確認してから次の手順へ進んでください。
 
-3. 本番用の依存関係をインストールします。開発用パッケージを含めず、`composer.lock`の内容どおりに導入します。
+3. 本番用の依存関係をインストールします。開発用パッケージを含めず、`composer.lock`の内容どおりに導入します。`<tools-directory>`には、手順2で入力したツールディレクトリと同じ絶対パスを指定してください。
 
     ```shell
     cd <app-directory>
@@ -340,6 +365,13 @@ cp <app-directory>/public/.htaccess <public_html-directory>/.htaccess
 - **アプリコード**: `git log`で直前の安定コミットを確認し、`git checkout <直前のコミット>`で戻します。その後、そのコミット時点の`composer.lock`に合わせて`composer install`を再実行します。
 - **マイグレーション**: `bin/migrate.php`にロールバック機能はありません。マイグレーション適用後に問題が起きた場合は、データベースのバックアップからの復元、または追加のマイグレーションでの是正を検討し、適用済みのマイグレーションファイルは変更しません。
 - **公開ファイル**: `public_html`側は`index.php`のシンボリックリンクと`.htaccess`の通常ファイルの2つだけのため、問題が起きた場合は`index.php`のリンクを削除する、または`.htaccess`を退避すれば公開を止められます。
+
+### ログの扱い
+
+- 現在のアプリケーションは、独自のログファイルを生成しません。`bootstrap/app.php`はSlimのエラーミドルウェアをログ出力無効(`logErrors: false`)で登録しており、Monolog等のロギングライブラリも導入していません(`composer.json`で確認済み)。
+- CLIコマンド(`bin/migrate.php`、`bin/check-slack.php`、`bin/check-imap.php`)の実行結果・エラーは、標準出力または標準エラーへ出力されるだけで、ファイルへは書き込みません。
+- HTTPアクセスの記録や、PHP/Apacheレベルの未捕捉エラーは、アプリケーションではなくXServer側のアクセスログ・エラーログで確認します。ただし、そのログの具体的な保存先(絶対パス)は、`docs/production-environment.md`を含め今回確認できた事実の範囲には含まれていません。**推測でパスを記載することはできないため、XServerのサーバーパネルまたは公式ドキュメントで確認してください。** 確認できた内容は、必要に応じて`docs/production-environment.md`へ追記することを想定しています。
+- Bearer Token、Slack Bot Token、IMAPパスワードなどの秘密情報、メール本文・メールアドレスなどの個人情報を、独自ログへ保存する実装は存在しません。既存の疎通確認コマンド(`bin/check-slack.php`、`bin/check-imap.php`)も、失敗時の診断情報から設定値そのものを除去する実装になっています(「Slack App設定」「メール検索」節を参照)。
 
 ### /healthに依存しない疎通確認
 
