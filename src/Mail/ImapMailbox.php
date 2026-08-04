@@ -11,7 +11,8 @@ class ImapMailbox
 {
     private const FOLDER = 'INBOX';
 
-    private ?Connection $connection = null;
+    /** @var Connection|null */
+    private ?object $connection = null;
     private string $mailbox;
 
     public function __construct(
@@ -28,8 +29,10 @@ class ImapMailbox
         );
     }
 
-    public function connect(bool $shouldIncludeDiagnostics = false): void
-    {
+    public function connect(
+        bool $shouldIncludeDiagnostics = false,
+        bool $shouldUseReadOnly = true,
+    ): void {
         imap_errors();
         imap_alerts();
 
@@ -37,7 +40,7 @@ class ImapMailbox
             $this->mailbox,
             $this->username,
             $this->password,
-            OP_READONLY,
+            $shouldUseReadOnly ? OP_READONLY : 0,
             1,
         );
 
@@ -208,6 +211,123 @@ class ImapMailbox
         }
 
         return $messages;
+    }
+
+    /**
+     * @return array{subject: string, body: string}
+     */
+    public function readMessage(
+        int $uid,
+        MimeMessageDecoder $decoder,
+    ): array {
+        if ($this->connection === null) {
+            throw new RuntimeException('IMAP message read failed.');
+        }
+
+        $overview = @imap_fetch_overview(
+            $this->connection,
+            (string) $uid,
+            FT_UID,
+        );
+        $structure = @imap_fetchstructure(
+            $this->connection,
+            $uid,
+            FT_UID,
+        );
+
+        if (
+            $overview === false
+            || !isset($overview[0])
+            || $structure === false
+        ) {
+            imap_errors();
+            imap_alerts();
+
+            throw new RuntimeException('IMAP message read failed.');
+        }
+
+        return [
+            'subject' => $decoder->decodeSubject(
+                (string) ($overview[0]->subject ?? ''),
+            ),
+            'body' => $decoder->decodeBody(
+                $structure,
+                fn (string $section): string|false => @imap_fetchbody(
+                    $this->connection,
+                    $uid,
+                    $section,
+                    FT_UID | FT_PEEK,
+                ),
+            ),
+        ];
+    }
+
+    public function markMessageAsSeen(int $uid): void
+    {
+        if ($this->connection === null) {
+            throw new RuntimeException('IMAP message update failed.');
+        }
+
+        imap_errors();
+        imap_alerts();
+
+        @imap_setflag_full(
+            $this->connection,
+            (string) $uid,
+            '\\Seen',
+            ST_UID,
+        );
+
+        $updateErrors = imap_errors();
+        imap_alerts();
+        $overview = @imap_fetch_overview(
+            $this->connection,
+            (string) $uid,
+            FT_UID,
+        );
+        $verificationErrors = imap_errors();
+        imap_alerts();
+
+        if (
+            is_array($updateErrors)
+            || is_array($verificationErrors)
+            || $overview === false
+            || !isset($overview[0])
+            || (int) ($overview[0]->seen ?? 0) !== 1
+        ) {
+            throw new RuntimeException('IMAP message update failed.');
+        }
+    }
+
+    public function moveMessage(int $uid, string $toFolder): void
+    {
+        if ($this->connection === null) {
+            throw new RuntimeException('IMAP message move failed.');
+        }
+
+        imap_errors();
+        imap_alerts();
+
+        $moved = @imap_mail_move(
+            $this->connection,
+            (string) $uid,
+            self::FOLDER . '.' . $toFolder,
+            CP_UID,
+        );
+        $moveErrors = imap_errors();
+        imap_alerts();
+
+        if ($moved === false || is_array($moveErrors)) {
+            throw new RuntimeException('IMAP message move failed.');
+        }
+
+        @imap_expunge($this->connection);
+        $expungeErrors = imap_errors();
+        imap_alerts();
+
+        if (is_array($expungeErrors)) {
+            throw new RuntimeException('IMAP message move failed.');
+        }
     }
 
     public function disconnect(): void

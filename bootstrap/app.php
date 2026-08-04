@@ -5,6 +5,11 @@ declare(strict_types=1);
 use BvlionBatch5\Database\ConnectionFactory;
 use BvlionBatch5\Dating\DatingNotificationService;
 use BvlionBatch5\Dating\DatingRepository;
+use BvlionBatch5\Mail\ImapMailbox;
+use BvlionBatch5\Mail\MailProcessingHistoryRepository;
+use BvlionBatch5\Mail\MailProcessingService;
+use BvlionBatch5\Mail\MailRuleRepository;
+use BvlionBatch5\Mail\MimeMessageDecoder;
 use BvlionBatch5\Middleware\BearerTokenMiddleware;
 use BvlionBatch5\Overtime\OvertimeNotificationRepository;
 use BvlionBatch5\Overtime\OvertimeNotificationService;
@@ -53,6 +58,60 @@ $overtimeNotificationService = new OvertimeNotificationService(
         $configuration['slack']['bot_token'],
     ),
 );
+$imapConfiguration = $configuration['imap'];
+$mailConnectionFactory = new ConnectionFactory(
+    $databaseConfiguration['host'],
+    $databaseConfiguration['port'],
+    $databaseConfiguration['name'],
+    $databaseConfiguration['user'],
+    $databaseConfiguration['password'],
+);
+$mailProcessingService = new MailProcessingService(
+    new MailRuleRepository($mailConnectionFactory),
+    new ImapMailbox(
+        $imapConfiguration['host'],
+        (int) $imapConfiguration['port'],
+        $imapConfiguration['username'],
+        $imapConfiguration['password'],
+    ),
+    new MimeMessageDecoder(),
+    new MailProcessingHistoryRepository($mailConnectionFactory),
+    new SlackClient(
+        new Client(),
+        $configuration['slack']['bot_token'],
+    ),
+    hash(
+        'sha256',
+        $imapConfiguration['host']
+        . "\0"
+        . $imapConfiguration['username']
+        . "\0INBOX",
+    ),
+);
+
+$app
+    ->post(
+        '/api/mail/process',
+        function (
+            ServerRequestInterface $request,
+            ResponseInterface $response,
+        ) use ($mailProcessingService): ResponseInterface {
+            $response->getBody()->write(
+                json_encode(
+                    $mailProcessingService->process(),
+                    JSON_THROW_ON_ERROR,
+                ),
+            );
+
+            return $response;
+        },
+    )
+    ->add(
+        new BearerTokenMiddleware(
+            $configuration['bearer_token']['scheduler'],
+            $app->getResponseFactory(),
+        ),
+    );
 
 $app
     ->post(

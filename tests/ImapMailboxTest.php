@@ -10,13 +10,20 @@ namespace BvlionBatch5\Mail {
         int $flags = 0,
         int $retries = 0,
         array $options = [],
-    ): false {
+    ): object|false {
         $GLOBALS['bvlion_batch5_imap_errors']
             = $GLOBALS['bvlion_batch5_next_imap_errors'] ?? false;
         $GLOBALS['bvlion_batch5_imap_alerts']
             = $GLOBALS['bvlion_batch5_next_imap_alerts'] ?? false;
+        $connection = $GLOBALS['bvlion_batch5_next_imap_connection']
+            ?? false;
+        unset(
+            $GLOBALS['bvlion_batch5_next_imap_connection'],
+            $GLOBALS['bvlion_batch5_next_imap_errors'],
+            $GLOBALS['bvlion_batch5_next_imap_alerts'],
+        );
 
-        return false;
+        return $connection;
     }
 
     function imap_errors(): array|false
@@ -34,10 +41,91 @@ namespace BvlionBatch5\Mail {
 
         return $alerts;
     }
+
+    function imap_mail_move(
+        object $connection,
+        string $messageNumbers,
+        string $mailbox,
+        int $flags = 0,
+    ): bool {
+        $GLOBALS['bvlion_batch5_imap_move_arguments'] = [
+            'message_numbers' => $messageNumbers,
+            'mailbox' => $mailbox,
+            'flags' => $flags,
+        ];
+        $moveErrors = $GLOBALS['bvlion_batch5_next_imap_move_errors']
+            ?? false;
+        $moveAlerts = $GLOBALS['bvlion_batch5_next_imap_move_alerts']
+            ?? false;
+
+        if (is_array($moveErrors)) {
+            $currentErrors = $GLOBALS['bvlion_batch5_imap_errors'] ?? false;
+            $GLOBALS['bvlion_batch5_imap_errors'] = array_merge(
+                is_array($currentErrors) ? $currentErrors : [],
+                $moveErrors,
+            );
+        }
+
+        if (is_array($moveAlerts)) {
+            $currentAlerts = $GLOBALS['bvlion_batch5_imap_alerts'] ?? false;
+            $GLOBALS['bvlion_batch5_imap_alerts'] = array_merge(
+                is_array($currentAlerts) ? $currentAlerts : [],
+                $moveAlerts,
+            );
+        }
+
+        $result = $GLOBALS['bvlion_batch5_next_imap_move_result'] ?? true;
+        unset(
+            $GLOBALS['bvlion_batch5_next_imap_move_result'],
+            $GLOBALS['bvlion_batch5_next_imap_move_errors'],
+            $GLOBALS['bvlion_batch5_next_imap_move_alerts'],
+        );
+
+        return $result;
+    }
+
+    function imap_expunge(object $connection): true
+    {
+        $GLOBALS['bvlion_batch5_imap_expunge_call_count']
+            = ($GLOBALS['bvlion_batch5_imap_expunge_call_count'] ?? 0) + 1;
+        $expungeErrors = $GLOBALS['bvlion_batch5_next_imap_expunge_errors']
+            ?? false;
+        $expungeAlerts = $GLOBALS['bvlion_batch5_next_imap_expunge_alerts']
+            ?? false;
+
+        if (is_array($expungeErrors)) {
+            $currentErrors = $GLOBALS['bvlion_batch5_imap_errors'] ?? false;
+            $GLOBALS['bvlion_batch5_imap_errors'] = array_merge(
+                is_array($currentErrors) ? $currentErrors : [],
+                $expungeErrors,
+            );
+        }
+
+        if (is_array($expungeAlerts)) {
+            $currentAlerts = $GLOBALS['bvlion_batch5_imap_alerts'] ?? false;
+            $GLOBALS['bvlion_batch5_imap_alerts'] = array_merge(
+                is_array($currentAlerts) ? $currentAlerts : [],
+                $expungeAlerts,
+            );
+        }
+
+        unset(
+            $GLOBALS['bvlion_batch5_next_imap_expunge_errors'],
+            $GLOBALS['bvlion_batch5_next_imap_expunge_alerts'],
+        );
+
+        return true;
+    }
+
+    function imap_close(object $connection): true
+    {
+        return true;
+    }
 }
 
 namespace BvlionBatch5\Tests {
     use BvlionBatch5\Mail\ImapMailbox;
+    use BvlionBatch5\Mail\MimeMessageDecoder;
     use PHPUnit\Framework\TestCase;
     use RuntimeException;
 
@@ -163,6 +251,216 @@ namespace BvlionBatch5\Tests {
                     'example-password',
                     $exception->getMessage(),
                 );
+            }
+        }
+
+        public function testReadMessageWithoutConnectionFailsSafely(): void
+        {
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('IMAP message read failed.');
+
+            $mailbox->readMessage(101, new MimeMessageDecoder());
+        }
+
+        public function testMarkMessageAsSeenWithoutConnectionFailsSafely(): void
+        {
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('IMAP message update failed.');
+
+            $mailbox->markMessageAsSeen(101);
+        }
+
+        public function testMoveMessageWithoutConnectionFailsSafely(): void
+        {
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('IMAP message move failed.');
+
+            $mailbox->moveMessage(101, 'ExampleArchive');
+        }
+
+        public function testMoveMessageFailsWhenMoveReturnsFalse(): void
+        {
+            $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
+            $GLOBALS['bvlion_batch5_next_imap_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_move_result'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_move_errors'] = [
+                'Example move error.',
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_move_alerts'] = false;
+            $GLOBALS['bvlion_batch5_imap_expunge_call_count'] = 0;
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+            $mailbox->connect(false, false);
+
+            try {
+                $mailbox->moveMessage(101, 'ExampleArchive');
+                self::fail('RuntimeException was not thrown.');
+            } catch (RuntimeException $exception) {
+                self::assertSame(
+                    'IMAP message move failed.',
+                    $exception->getMessage(),
+                );
+                self::assertSame(
+                    0,
+                    $GLOBALS['bvlion_batch5_imap_expunge_call_count'],
+                );
+            } finally {
+                $mailbox->disconnect();
+            }
+        }
+
+        public function testMoveMessageFailsWhenMoveReportsError(): void
+        {
+            $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
+            $GLOBALS['bvlion_batch5_next_imap_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_move_result'] = true;
+            $GLOBALS['bvlion_batch5_next_imap_move_errors'] = [
+                'Example move error.',
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_move_alerts'] = false;
+            $GLOBALS['bvlion_batch5_imap_expunge_call_count'] = 0;
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+            $mailbox->connect(false, false);
+
+            try {
+                $mailbox->moveMessage(101, 'ExampleArchive');
+                self::fail('RuntimeException was not thrown.');
+            } catch (RuntimeException $exception) {
+                self::assertSame(
+                    'IMAP message move failed.',
+                    $exception->getMessage(),
+                );
+                self::assertSame(
+                    0,
+                    $GLOBALS['bvlion_batch5_imap_expunge_call_count'],
+                );
+            } finally {
+                $mailbox->disconnect();
+            }
+        }
+
+        public function testMoveMessageFailsWhenExpungeReportsError(): void
+        {
+            $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
+            $GLOBALS['bvlion_batch5_next_imap_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_move_result'] = true;
+            $GLOBALS['bvlion_batch5_next_imap_move_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_move_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_expunge_errors'] = [
+                'Example expunge error.',
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_expunge_alerts'] = false;
+            $GLOBALS['bvlion_batch5_imap_expunge_call_count'] = 0;
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+            $mailbox->connect(false, false);
+
+            try {
+                $mailbox->moveMessage(101, 'ExampleArchive');
+                self::fail('RuntimeException was not thrown.');
+            } catch (RuntimeException $exception) {
+                self::assertSame(
+                    'IMAP message move failed.',
+                    $exception->getMessage(),
+                );
+                self::assertStringNotContainsString(
+                    '101',
+                    $exception->getMessage(),
+                );
+                self::assertStringNotContainsString(
+                    'ExampleArchive',
+                    $exception->getMessage(),
+                );
+                self::assertSame(
+                    1,
+                    $GLOBALS['bvlion_batch5_imap_expunge_call_count'],
+                );
+            } finally {
+                $mailbox->disconnect();
+            }
+        }
+
+        public function testMoveMessageUsesUidAndCompletesExpunge(): void
+        {
+            $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
+            $GLOBALS['bvlion_batch5_next_imap_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_move_result'] = true;
+            $GLOBALS['bvlion_batch5_next_imap_move_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_move_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_expunge_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_expunge_alerts'] = false;
+            $GLOBALS['bvlion_batch5_imap_expunge_call_count'] = 0;
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+            $mailbox->connect(false, false);
+            $GLOBALS['bvlion_batch5_imap_errors'] = [
+                'Example stale error.',
+            ];
+            $GLOBALS['bvlion_batch5_imap_alerts'] = [
+                'Example stale alert.',
+            ];
+
+            try {
+                $mailbox->moveMessage(101, 'ExampleArchive');
+
+                self::assertSame(
+                    [
+                        'message_numbers' => '101',
+                        'mailbox' => 'INBOX.ExampleArchive',
+                        'flags' => CP_UID,
+                    ],
+                    $GLOBALS['bvlion_batch5_imap_move_arguments'],
+                );
+                self::assertSame(
+                    1,
+                    $GLOBALS['bvlion_batch5_imap_expunge_call_count'],
+                );
+                self::assertFalse(\BvlionBatch5\Mail\imap_errors());
+                self::assertFalse(\BvlionBatch5\Mail\imap_alerts());
+            } finally {
+                $mailbox->disconnect();
             }
         }
     }

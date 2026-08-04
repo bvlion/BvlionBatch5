@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace BvlionBatch5\Mail;
 
+use RuntimeException;
 use stdClass;
 use ValueError;
 
@@ -147,7 +148,7 @@ final class MimeMessageDecoder
         $body = $bodyFetcher($partNumber);
 
         if ($body === false) {
-            return null;
+            throw new RuntimeException('IMAP message body fetch failed.');
         }
 
         $encoding = (int) ($part->encoding ?? ENC7BIT);
