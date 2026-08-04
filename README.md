@@ -233,6 +233,177 @@ docker compose run --rm app composer test
 
 Dockerはローカル開発でのみ使用します。本番環境はDocker化せず、XServerのPHP 8.5.5を使用します。詳細は[本番実行環境](docs/production-environment.md)を参照してください。
 
+## 本番デプロイ
+
+本番デプロイは手動で行います。GitHub Actionsは使用しません。理由は次のとおりです。
+
+- 現時点でデプロイ用のGitHub SecretsとWorkflowが存在しません。
+- 手動SSHで配備できる環境が既にあります。
+- デプロイ頻度が高くない個人サービスです。
+- GitHub Actions化には、鍵管理・失敗時対応・ログ設計など、このデプロイ手順を超える検討が追加で必要になります。
+
+GitHub Actions化が必要になった場合は、別Issueとして扱います。
+
+### 配置の考え方
+
+- ドメインのドキュメントルート(`public_html`)は固定であり、変更できません。ここには公開してよいファイルだけを置きます。
+- アプリ本体(`bootstrap`、`src`、`vendor`、`composer.*`、`database`、`bin`、`.env`など)は、アカウントホーム配下かつ`public_html`外の専用ディレクトリへ配置します。以下ではこのディレクトリを`<app-directory>`と表記します。実際の絶対パスはリポジトリへ記載しません。
+- `public_html`には、`<app-directory>/public/index.php`と`<app-directory>/public/.htaccess`へのシンボリックリンクだけを配置します。`.htaccess`もドキュメントルート直下(のシンボリックリンク)に置くことで、既存の`.htaccess`のRewrite設定がそのまま有効になります。
+- この方式(方式A)は、ドキュメントルート内のシンボリックリンク経由でドキュメントルート外のPHPファイルを実行した場合でも、PHPの`__DIR__`が実体側のディレクトリで解決されることを実機で確認済みです。そのため`public/index.php`はコード変更なしでそのまま利用できます。
+
+### 初回デプロイ
+
+1. SSHでログインし、`<app-directory>`を作成してリポジトリを取得します。
+
+    ```shell
+    mkdir -p <app-directory>
+    cd <app-directory>
+    git clone https://github.com/bvlion/BvlionBatch5.git .
+    ```
+
+2. 専用のComposerを、検証済みチェックサムでBvlionBatch5専用の非公開ツールディレクトリへ配置します。共有Composerは使用・更新しません。Composerの公式インストーラー検証手順に従います。
+
+    ```shell
+    cd <tools-directory>
+    /opt/php-8.5.5/bin/php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+    /opt/php-8.5.5/bin/php -r "if (hash_file('sha384', 'composer-setup.php') === file_get_contents('https://composer.github.io/installer.sig')) { echo 'Installer verified' . PHP_EOL; } else { echo 'Installer corrupt' . PHP_EOL; unlink('composer-setup.php'); } echo PHP_EOL;"
+    /opt/php-8.5.5/bin/php composer-setup.php --install-dir=<tools-directory> --filename=composer.phar
+    /opt/php-8.5.5/bin/php -r "unlink('composer-setup.php');"
+    ```
+
+    `Installer verified`が表示されることを確認してから`composer-setup.php`を実行してください。`Installer corrupt`と表示された場合は実行を中止します。
+
+3. 本番用の依存関係をインストールします。開発用パッケージを含めず、`composer.lock`の内容どおりに導入します。
+
+    ```shell
+    cd <app-directory>
+    /opt/php-8.5.5/bin/php <tools-directory>/composer.phar install --no-dev --optimize-autoloader --classmap-authoritative
+    ```
+
+    `--optimize-autoloader --classmap-authoritative`は、デプロイのたびに`composer install`を実行する運用と整合するため採用します。コードの変更後に依存関係を更新し忘れると、追加したクラスが読み込めなくなる点に注意してください。
+
+4. `.env`を配置します。値は`.env.example`をコピーし、README「環境設定」節の一覧に従って本番値を設定します。実際の値はコミットしません。
+
+    ```shell
+    cp .env.example .env
+    chmod 600 .env
+    ```
+
+5. `public_html`側に、公開してよい2ファイルへのシンボリックリンクだけを作成します。`public_html`内に他のファイルは置きません。
+
+    ```shell
+    ln -s <app-directory>/public/index.php <public_html-directory>/index.php
+    ln -s <app-directory>/public/.htaccess <public_html-directory>/.htaccess
+    ```
+
+6. 権限を設定します。一般的な作りに寄せるなら、ディレクトリは755、ファイルは644、`.env`は600を目安にします。この権限で本番のHTTP実行環境から読み取れるかは、後述の「疎通確認」で確認してください。想定と異なるエラーが出た場合は、実際の実行ユーザー・グループに合わせて調整が必要です。具体的な必要権限は`docs/production-environment.md`に記載がなく、本手順書だけでは確定できません。
+
+7. マイグレーションを適用します(「データベースとマイグレーション」節を参照)。
+
+    ```shell
+    /opt/php-8.5.5/bin/php bin/migrate.php
+    ```
+
+8. 「/healthに依存しない疎通確認」を実施します。
+
+### 更新デプロイ
+
+```shell
+cd <app-directory>
+git fetch origin main
+git checkout main
+git pull --ff-only origin main
+/opt/php-8.5.5/bin/php <tools-directory>/composer.phar install --no-dev --optimize-autoloader --classmap-authoritative
+/opt/php-8.5.5/bin/php bin/migrate.php
+```
+
+`public_html`側のシンボリックリンクは初回作成時のリンク先を再利用するため、更新デプロイのたびに作り直す必要はありません。更新後は「疎通確認」を実施します。
+
+### 失敗時にどこまで戻すか
+
+- **アプリコード**: `git log`で直前の安定コミットを確認し、`git checkout <直前のコミット>`で戻します。その後、そのコミット時点の`composer.lock`に合わせて`composer install`を再実行します。
+- **マイグレーション**: `bin/migrate.php`にロールバック機能はありません。マイグレーション適用後に問題が起きた場合は、データベースのバックアップからの復元、または追加のマイグレーションでの是正を検討し、適用済みのマイグレーションファイルは変更しません。
+- **公開ファイル**: `public_html`側は2つのシンボリックリンクのみのため、問題が起きた場合はリンクを削除するだけで公開を止められます。
+
+### /healthに依存しない疎通確認
+
+`/health`エンドポイントは実装しません。疎通確認は次の手順で行います。
+
+#### 0. 外部サービス疎通の補助確認(任意・推奨)
+
+API疎通確認の前に、Slack・IMAPそれぞれの外部サービスへの到達性を単体で確認しておくと、問題が起きた際の切り分けに役立ちます。
+
+```shell
+/opt/php-8.5.5/bin/php bin/check-slack.php
+/opt/php-8.5.5/bin/php bin/check-imap.php
+```
+
+それぞれ専用の環境変数だけを使用し、既存のAPIやデータベースには触れません(詳細は「Slack App設定」「メール検索」節を参照)。
+
+#### 1. 未認証確認
+
+3つのAPIすべてが、Authorizationヘッダーなしで401を返すことを確認します。これは`.htaccess`のRewriteによって`Authorization`ヘッダーがPHPまで到達していること、ルーティングとBearer Token認証が機能していることの確認です。
+
+```shell
+curl -i -X POST https://<domain>/api/mail/process
+curl -i -X POST https://<domain>/api/dating/notify
+curl -i -X POST https://<domain>/api/overtime/notify
+```
+
+3件とも`HTTP/1.1 401`を確認します。
+
+#### 2. 認証済み確認
+
+副作用(実際のSlack投稿・メールの既読化や移動)を発生させない状態を用意したうえで、正規のBearer Tokenを付与して確認します。
+
+- **記念日通知**: `dating`テーブルに該当データがない状態(初回デプロイ直後など)で実行し、投稿が発生せずHTTP 204が返ることを確認します。
+
+    ```shell
+    curl -i -X POST https://<domain>/api/dating/notify \
+      -H "Authorization: Bearer <SCHEDULER_BEARER_TOKEN>"
+    ```
+
+- **メール処理**: `mail_api`テーブルに`enable_flag = 1`の行がない状態で実行します。有効なルールが1件もない場合、IMAPへ接続せずに即座に応答するため、IMAP接続やSlack投稿を発生させずに確認できます。
+
+    ```shell
+    curl -i -X POST https://<domain>/api/mail/process \
+      -H "Authorization: Bearer <SCHEDULER_BEARER_TOKEN>"
+    ```
+
+    `{"success":true,"failure_count":0}`とHTTP 200を確認します。
+
+- **残業通知**: `overtime_notification_settings`に`id = 1`の行がない状態で実行すると、Slack投稿を発生させずにHTTP 500(`Overtime notification configuration is missing.`)が返ります。これはルーティングとデータベース接続の確認にはなりますが、Slack投稿までを含めた確認にはなりません。
+
+    ```shell
+    curl -i -X POST https://<domain>/api/overtime/notify \
+      -H "Authorization: Bearer <OVERTIME_BEARER_TOKEN>"
+    ```
+
+    Slack投稿まで含めて確認する場合は、テスト用チャンネルと架空の文面を一時的に設定してから実行します。**本番データベースへの書き込みを伴うため、実行前に承認を得てから行ってください。**
+
+    ```sql
+    INSERT INTO overtime_notification_settings (id, message, channel_id)
+    VALUES (1, 'Overtime notification connectivity test.', '<test-channel-id>')
+    ON DUPLICATE KEY UPDATE
+      message = VALUES(message),
+      channel_id = VALUES(channel_id);
+    ```
+
+    ```shell
+    curl -i -X POST https://<domain>/api/overtime/notify \
+      -H "Authorization: Bearer <OVERTIME_BEARER_TOKEN>"
+    ```
+
+    HTTP 200と`timestamp`を確認したら、本番用の文面・チャンネルIDへ設定を戻します。
+
+    ```sql
+    UPDATE overtime_notification_settings
+    SET message = '<本番文面>', channel_id = '<本番チャンネルID>'
+    WHERE id = 1;
+    ```
+
+    上記のテスト用チャンネルID・文面・本番文面・本番チャンネルIDは、実際の値をリポジトリやPR、共有ログへ記載しないでください。
+
 ## 開発運用
 
 - 1つのIssueにつき、1つのブランチと1つのPRを作成します。
