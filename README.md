@@ -248,8 +248,10 @@ GitHub Actions化が必要になった場合は、別Issueとして扱います�
 
 - ドメインのドキュメントルート(`public_html`)は固定であり、変更できません。ここには公開してよいファイルだけを置きます。
 - アプリ本体(`bootstrap`、`src`、`vendor`、`composer.*`、`database`、`bin`、`.env`など)は、アカウントホーム配下かつ`public_html`外の専用ディレクトリへ配置します。以下ではこのディレクトリを`<app-directory>`と表記します。実際の絶対パスはリポジトリへ記載しません。
-- `public_html`には、`<app-directory>/public/index.php`と`<app-directory>/public/.htaccess`へのシンボリックリンクだけを配置します。`.htaccess`もドキュメントルート直下(のシンボリックリンク)に置くことで、既存の`.htaccess`のRewrite設定がそのまま有効になります。
-- この方式(方式A)は、ドキュメントルート内のシンボリックリンク経由でドキュメントルート外のPHPファイルを実行した場合でも、PHPの`__DIR__`が実体側のディレクトリで解決されることを実機で確認済みです。そのため`public/index.php`はコード変更なしでそのまま利用できます。
+- `public_html`には次の2つだけを配置します。
+  - `index.php`: `<app-directory>/public/index.php`へのシンボリックリンク
+  - `.htaccess`: `<app-directory>/public/.htaccess`をコピーした通常ファイル
+- 実機で確認できたのは、`public_html`内のシンボリックリンク経由で`public_html`外のPHPファイルを実行した場合に、PHPの`__DIR__`が実体側のディレクトリで解決されることだけです。`.htaccess`をシンボリックリンクにした場合にApacheがRewriteや`Authorization`ヘッダー転送を同様に処理するかは確認していないため、`.htaccess`はシンボリックリンクにせず、`public_html`直下へ通常ファイルとして配置します。この方式(方式A)により、`public/index.php`はコード変更なしでそのまま利用できます。
 
 ### 初回デプロイ
 
@@ -261,17 +263,30 @@ GitHub Actions化が必要になった場合は、別Issueとして扱います�
     git clone https://github.com/bvlion/BvlionBatch5.git .
     ```
 
-2. 専用のComposerを、検証済みチェックサムでBvlionBatch5専用の非公開ツールディレクトリへ配置します。共有Composerは使用・更新しません。Composerの公式インストーラー検証手順に従います。
+2. 専用のComposerを、検証済みチェックサムでBvlionBatch5専用の非公開ツールディレクトリへ配置します。共有Composerは使用・更新しません。Composerの公式インストーラー検証手順に沿って、ダウンロード・SHA-384検証・インストール・後始末を1つのスクリプトで実行します。チェックサムが一致しない場合は、`composer-setup.php`を削除したうえで必ず非ゼロの終了コードで停止し、インストールへは進みません。
 
     ```shell
+    mkdir -p <tools-directory>
     cd <tools-directory>
+
+    EXPECTED_SIGNATURE="$(/opt/php-8.5.5/bin/php -r "echo file_get_contents('https://composer.github.io/installer.sig');")"
     /opt/php-8.5.5/bin/php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
-    /opt/php-8.5.5/bin/php -r "if (hash_file('sha384', 'composer-setup.php') === file_get_contents('https://composer.github.io/installer.sig')) { echo 'Installer verified' . PHP_EOL; } else { echo 'Installer corrupt' . PHP_EOL; unlink('composer-setup.php'); } echo PHP_EOL;"
+    ACTUAL_SIGNATURE="$(/opt/php-8.5.5/bin/php -r "echo hash_file('sha384', 'composer-setup.php');")"
+
+    if [ "$EXPECTED_SIGNATURE" != "$ACTUAL_SIGNATURE" ]; then
+        echo 'ERROR: Composer installer signature mismatch.' >&2
+        rm -f composer-setup.php
+        exit 1
+    fi
+
     /opt/php-8.5.5/bin/php composer-setup.php --install-dir=<tools-directory> --filename=composer.phar
-    /opt/php-8.5.5/bin/php -r "unlink('composer-setup.php');"
+    RESULT=$?
+    rm -f composer-setup.php
+    unset EXPECTED_SIGNATURE ACTUAL_SIGNATURE
+    exit $RESULT
     ```
 
-    `Installer verified`が表示されることを確認してから`composer-setup.php`を実行してください。`Installer corrupt`と表示された場合は実行を中止します。
+    署名不一致時は`ERROR: Composer installer signature mismatch.`を表示して終了コード1で停止し、`composer-setup.php`は削除されます。この場合は`composer.phar`をインストールせず、原因を確認してから再実行してください。
 
 3. 本番用の依存関係をインストールします。開発用パッケージを含めず、`composer.lock`の内容どおりに導入します。
 
@@ -289,11 +304,11 @@ GitHub Actions化が必要になった場合は、別Issueとして扱います�
     chmod 600 .env
     ```
 
-5. `public_html`側に、公開してよい2ファイルへのシンボリックリンクだけを作成します。`public_html`内に他のファイルは置きません。
+5. `public_html`側に、公開してよい2ファイルだけを配置します。`index.php`はシンボリックリンク、`.htaccess`は通常ファイルとしてコピーします。`public_html`内に他のファイルは置きません。
 
     ```shell
     ln -s <app-directory>/public/index.php <public_html-directory>/index.php
-    ln -s <app-directory>/public/.htaccess <public_html-directory>/.htaccess
+    cp <app-directory>/public/.htaccess <public_html-directory>/.htaccess
     ```
 
 6. 権限を設定します。一般的な作りに寄せるなら、ディレクトリは755、ファイルは644、`.env`は600を目安にします。この権限で本番のHTTP実行環境から読み取れるかは、後述の「疎通確認」で確認してください。想定と異なるエラーが出た場合は、実際の実行ユーザー・グループに合わせて調整が必要です。具体的な必要権限は`docs/production-environment.md`に記載がなく、本手順書だけでは確定できません。
@@ -315,15 +330,16 @@ git checkout main
 git pull --ff-only origin main
 /opt/php-8.5.5/bin/php <tools-directory>/composer.phar install --no-dev --optimize-autoloader --classmap-authoritative
 /opt/php-8.5.5/bin/php bin/migrate.php
+cp <app-directory>/public/.htaccess <public_html-directory>/.htaccess
 ```
 
-`public_html`側のシンボリックリンクは初回作成時のリンク先を再利用するため、更新デプロイのたびに作り直す必要はありません。更新後は「疎通確認」を実施します。
+`public_html`側の`index.php`は初回作成時のシンボリックリンクを再利用するため、更新デプロイのたびに作り直す必要はありません。一方`.htaccess`は通常ファイルとしてコピーしているため、リポジトリ側の`public/.htaccess`が変更されていなくても、更新デプロイのたびに上書きコピーしてください。更新後は「疎通確認」を実施します。
 
 ### 失敗時にどこまで戻すか
 
 - **アプリコード**: `git log`で直前の安定コミットを確認し、`git checkout <直前のコミット>`で戻します。その後、そのコミット時点の`composer.lock`に合わせて`composer install`を再実行します。
 - **マイグレーション**: `bin/migrate.php`にロールバック機能はありません。マイグレーション適用後に問題が起きた場合は、データベースのバックアップからの復元、または追加のマイグレーションでの是正を検討し、適用済みのマイグレーションファイルは変更しません。
-- **公開ファイル**: `public_html`側は2つのシンボリックリンクのみのため、問題が起きた場合はリンクを削除するだけで公開を止められます。
+- **公開ファイル**: `public_html`側は`index.php`のシンボリックリンクと`.htaccess`の通常ファイルの2つだけのため、問題が起きた場合は`index.php`のリンクを削除する、または`.htaccess`を退避すれば公開を止められます。
 
 ### /healthに依存しない疎通確認
 
@@ -342,7 +358,7 @@ API疎通確認の前に、Slack・IMAPそれぞれの外部サービスへの�
 
 #### 1. 未認証確認
 
-3つのAPIすべてが、Authorizationヘッダーなしで401を返すことを確認します。これは`.htaccess`のRewriteによって`Authorization`ヘッダーがPHPまで到達していること、ルーティングとBearer Token認証が機能していることの確認です。
+3つのAPIすべてが、Authorizationヘッダーなしで401を返すことを確認します。これで確認できるのは、ルーティングとBearer Token認証による拒否が機能していることです。`Authorization`ヘッダーが`.htaccess`のRewriteによってPHPまで到達しているかどうかは、この時点では確認できません(ヘッダーがまったく転送されていなくても、未指定の場合と同じ401になるためです)。ヘッダー転送の確認は、後述の「認証済み確認」で正しいBearer Tokenを使ったリクエストが成功することによって行います。
 
 ```shell
 curl -i -X POST https://<domain>/api/mail/process
@@ -354,7 +370,7 @@ curl -i -X POST https://<domain>/api/overtime/notify
 
 #### 2. 認証済み確認
 
-副作用(実際のSlack投稿・メールの既読化や移動)を発生させない状態を用意したうえで、正規のBearer Tokenを付与して確認します。
+副作用(実際のSlack投稿・メールの既読化や移動)を発生させない状態を用意したうえで、正規のBearer Tokenを付与して確認します。正しいBearer Tokenを付与したリクエストが期待どおりの応答を返すことにより、`Authorization`ヘッダーが`.htaccess`のRewriteを経由してPHPまで到達していることも合わせて確認できます。
 
 - **記念日通知**: `dating`テーブルに該当データがない状態(初回デプロイ直後など)で実行し、投稿が発生せずHTTP 204が返ることを確認します。
 
@@ -372,37 +388,23 @@ curl -i -X POST https://<domain>/api/overtime/notify
 
     `{"success":true,"failure_count":0}`とHTTP 200を確認します。
 
-- **残業通知**: `overtime_notification_settings`に`id = 1`の行がない状態で実行すると、Slack投稿を発生させずにHTTP 500(`Overtime notification configuration is missing.`)が返ります。これはルーティングとデータベース接続の確認にはなりますが、Slack投稿までを含めた確認にはなりません。
+- **残業通知**: 本番用の設定(`overtime_notification_settings`の`id = 1`)をテスト値で一時的に上書きすることはしません。次の段階で確認します。
 
-    ```shell
-    curl -i -X POST https://<domain>/api/overtime/notify \
-      -H "Authorization: Bearer <OVERTIME_BEARER_TOKEN>"
-    ```
+    - 設定が未登録の状態(初回デプロイ直後など)で実行すると、Slack投稿を発生させずにHTTP 500(`Overtime notification configuration is missing.`)が返ります。これによりBearer認証、ルーティング、データベース接続までを確認できます。
 
-    Slack投稿まで含めて確認する場合は、テスト用チャンネルと架空の文面を一時的に設定してから実行します。**本番データベースへの書き込みを伴うため、実行前に承認を得てから行ってください。**
+        ```shell
+        curl -i -X POST https://<domain>/api/overtime/notify \
+          -H "Authorization: Bearer <OVERTIME_BEARER_TOKEN>"
+        ```
 
-    ```sql
-    INSERT INTO overtime_notification_settings (id, message, channel_id)
-    VALUES (1, 'Overtime notification connectivity test.', '<test-channel-id>')
-    ON DUPLICATE KEY UPDATE
-      message = VALUES(message),
-      channel_id = VALUES(channel_id);
-    ```
+    - Slackへの接続と投稿そのものは、`bin/check-slack.php`で確認します。このコマンドはテスト用チャンネル(`SLACK_TEST_CHANNEL_ID`)へテストメッセージを1件投稿します(詳細は「Slack App設定」節を参照)。
 
-    ```shell
-    curl -i -X POST https://<domain>/api/overtime/notify \
-      -H "Authorization: Bearer <OVERTIME_BEARER_TOKEN>"
-    ```
+        ```shell
+        /opt/php-8.5.5/bin/php bin/check-slack.php
+        ```
 
-    HTTP 200と`timestamp`を確認したら、本番用の文面・チャンネルIDへ設定を戻します。
-
-    ```sql
-    UPDATE overtime_notification_settings
-    SET message = '<本番文面>', channel_id = '<本番チャンネルID>'
-    WHERE id = 1;
-    ```
-
-    上記のテスト用チャンネルID・文面・本番文面・本番チャンネルIDは、実際の値をリポジトリやPR、共有ログへ記載しないでください。
+    - `POST /api/overtime/notify`をSlack投稿まで含めて確認するのは、本番用の文面・チャンネルIDを`overtime_notification_settings`へ正式に登録した後に行ってください。本番設定をテスト値で上書きする確認方法は採用しません。
+    - 本番設定を登録した後にこのAPIを実行すると、設定済みの本番チャンネルへ実際の通知が1件投稿されます。**実行前に必ず承認を得てから行ってください。**
 
 ## 開発運用
 
