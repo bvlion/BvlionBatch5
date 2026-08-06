@@ -47,6 +47,26 @@ final class LegacyDataImporterTest extends TestCase
     }
 
     /**
+     * The example fixtures below always contain 2 dating rows and 2
+     * mail_api rows (1 enabled with a channel, 1 with a null channel).
+     * The expected counts are configured to match, since the
+     * production defaults (4 / 44 / 43 / 1 / 31 / 1) are specific to
+     * the real legacy dataset confirmed for Issue #15.
+     */
+    private function createImporter(): LegacyDataImporter
+    {
+        return new LegacyDataImporter(
+            $this->connectionFactory,
+            expectedDatingCount: 2,
+            expectedMailApiCount: 2,
+            expectedMailApiEnabledCount: 2,
+            expectedMailApiDisabledCount: 0,
+            expectedMailApiNullChannelCount: 1,
+            expectedOvertimeCount: 1,
+        );
+    }
+
+    /**
      * @return list<array{id: int, target_date: string, message: string}>
      */
     private function exampleDatingRows(): array
@@ -119,11 +139,9 @@ final class LegacyDataImporterTest extends TestCase
         return ['example-legacy-channel' => 'C0000000000'];
     }
 
-    public function testDryRunValidatesWithoutWritingToDatabase(): void
+    public function testDryRunChecksTablesButWritesNothing(): void
     {
-        $importer = new LegacyDataImporter($this->connectionFactory);
-
-        $report = $importer->import(
+        $report = $this->createImporter()->import(
             $this->exampleDatingRows(),
             $this->exampleMailApiRows(),
             $this->exampleSettings(),
@@ -134,10 +152,19 @@ final class LegacyDataImporterTest extends TestCase
         self::assertTrue($report['valid']);
         self::assertTrue($report['dry_run']);
         self::assertFalse($report['executed']);
-        self::assertSame(2, $report['dating_count']);
-        self::assertSame(2, $report['mail_api_count']);
-        self::assertSame(1, $report['mail_api_null_channel_count']);
-        self::assertTrue($report['overtime_present']);
+        self::assertTrue($report['can_execute']);
+        self::assertTrue($report['all_tables_empty']);
+        self::assertSame(
+            ['dating' => 0, 'mail_api' => 0, 'overtime_notification_settings' => 0],
+            $report['existing_counts'],
+        );
+        self::assertTrue($report['expected_counts']['dating']['matches']);
+        self::assertSame(2, $report['expected_counts']['dating']['actual']);
+        self::assertTrue($report['expected_counts']['mail_api']['matches']);
+        self::assertTrue($report['expected_counts']['mail_api_enabled']['matches']);
+        self::assertTrue($report['expected_counts']['mail_api_disabled']['matches']);
+        self::assertTrue($report['expected_counts']['mail_api_null_channel']['matches']);
+        self::assertTrue($report['expected_counts']['overtime']['matches']);
         self::assertSame(
             0,
             (int) $this->connection
@@ -154,9 +181,7 @@ final class LegacyDataImporterTest extends TestCase
 
     public function testImportsAllTablesInSingleTransaction(): void
     {
-        $importer = new LegacyDataImporter($this->connectionFactory);
-
-        $report = $importer->import(
+        $report = $this->createImporter()->import(
             $this->exampleDatingRows(),
             $this->exampleMailApiRows(),
             $this->exampleSettings(),
@@ -165,6 +190,7 @@ final class LegacyDataImporterTest extends TestCase
         );
 
         self::assertTrue($report['valid']);
+        self::assertTrue($report['can_execute']);
         self::assertTrue($report['executed']);
         self::assertSame(2, $report['dating_inserted']);
         self::assertSame(2, $report['mail_api_inserted']);
@@ -188,8 +214,7 @@ final class LegacyDataImporterTest extends TestCase
                 . "VALUES ('0101', 'Existing.', 'C0000000000')",
         );
 
-        $importer = new LegacyDataImporter($this->connectionFactory);
-        $report = $importer->import(
+        $report = $this->createImporter()->import(
             $this->exampleDatingRows(),
             $this->exampleMailApiRows(),
             $this->exampleSettings(),
@@ -198,7 +223,9 @@ final class LegacyDataImporterTest extends TestCase
         );
 
         self::assertTrue($report['valid']);
+        self::assertFalse($report['can_execute']);
         self::assertFalse($report['executed']);
+        self::assertFalse($report['all_tables_empty']);
         self::assertSame('dating is not empty.', $report['abort_reason']);
         self::assertSame(
             0,
@@ -214,10 +241,29 @@ final class LegacyDataImporterTest extends TestCase
         );
     }
 
+    public function testDryRunAlsoAbortsWhenTargetTableIsNotEmpty(): void
+    {
+        $this->connection->exec(
+            "INSERT INTO dating (target_date, message, channel_id) "
+                . "VALUES ('0101', 'Existing.', 'C0000000000')",
+        );
+
+        $report = $this->createImporter()->import(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            $this->exampleChannelMap(),
+            true,
+        );
+
+        self::assertFalse($report['can_execute']);
+        self::assertFalse($report['all_tables_empty']);
+        self::assertSame('dating is not empty.', $report['abort_reason']);
+    }
+
     public function testAbortsWhenChannelMapIsMissingAnEntry(): void
     {
-        $importer = new LegacyDataImporter($this->connectionFactory);
-        $report = $importer->import(
+        $report = $this->createImporter()->import(
             $this->exampleDatingRows(),
             $this->exampleMailApiRows(),
             $this->exampleSettings(),
@@ -236,39 +282,57 @@ final class LegacyDataImporterTest extends TestCase
         );
     }
 
-    public function testTransactionRollsBackWhenAnInsertFails(): void
+    public function testAbortsWhenInputCountsDoNotMatchExpectations(): void
     {
-        // dating (inserted first) resolves to a valid channel ID, while
-        // the mail_api row (inserted afterward, in the same transaction)
-        // resolves to an oversized channel ID that MySQL rejects. This
-        // proves that already-inserted rows are rolled back together
-        // with the row that caused the failure.
-        $importer = new LegacyDataImporter($this->connectionFactory);
-        $mailApiRows = [
-            [
-                'id' => 40,
-                'target_from' => 'example-sender-a',
-                'to_folder' => 'ExampleArchiveA',
-                'channel' => 'example-legacy-channel-b',
-                'user_name' => 'Example Bot',
-                'icon_url' => 'https://example.test/icon.png',
-                'prefix_format' => '',
-                'enable_flag' => 1,
-            ],
-        ];
-        $channelMap = [
-            'example-legacy-channel' => 'C0000000000',
-            'example-legacy-channel-b' => str_repeat('C', 256),
-        ];
-
-        $report = $importer->import(
-            $this->exampleDatingRows(),
-            $mailApiRows,
+        $report = $this->createImporter()->import(
+            [$this->exampleDatingRows()[0]],
+            $this->exampleMailApiRows(),
             $this->exampleSettings(),
-            $channelMap,
+            $this->exampleChannelMap(),
             false,
         );
 
+        self::assertFalse($report['valid']);
+        self::assertFalse($report['executed']);
+        self::assertFalse($report['expected_counts']['dating']['matches']);
+        self::assertSame(2, $report['expected_counts']['dating']['expected']);
+        self::assertSame(1, $report['expected_counts']['dating']['actual']);
+        self::assertSame(
+            0,
+            (int) $this->connection
+                ->query('SELECT COUNT(*) FROM dating')
+                ->fetchColumn(),
+        );
+    }
+
+    public function testTransactionRollsBackWhenAnInsertFails(): void
+    {
+        // Application-level validation already rejects malformed
+        // values (see the channel_map tests below), so to exercise the
+        // rollback path itself, a real database-level failure is
+        // forced by temporarily narrowing mail_api.to_folder. dating
+        // (inserted first) succeeds, and mail_api (inserted second, in
+        // the same transaction) fails, proving the already-inserted
+        // dating rows are rolled back together with it.
+        $this->connection->exec(
+            'ALTER TABLE mail_api MODIFY COLUMN to_folder VARCHAR(5) NOT NULL',
+        );
+
+        try {
+            $report = $this->createImporter()->import(
+                $this->exampleDatingRows(),
+                $this->exampleMailApiRows(),
+                $this->exampleSettings(),
+                $this->exampleChannelMap(),
+                false,
+            );
+        } finally {
+            $this->connection->exec(
+                'ALTER TABLE mail_api MODIFY COLUMN to_folder VARCHAR(255) NOT NULL',
+            );
+        }
+
+        self::assertTrue($report['can_execute']);
         self::assertFalse($report['valid']);
         self::assertFalse($report['executed']);
         self::assertSame(0, $report['dating_inserted']);
@@ -285,6 +349,91 @@ final class LegacyDataImporterTest extends TestCase
             (int) $this->connection
                 ->query('SELECT COUNT(*) FROM mail_api')
                 ->fetchColumn(),
+        );
+    }
+
+    public function testChannelMapNullValueIsRejectedWithAnError(): void
+    {
+        $resolved = $this->createImporter()->resolve(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            ['example-legacy-channel' => null],
+        );
+
+        self::assertNotEmpty($resolved['errors']);
+        self::assertNull($resolved['overtime']);
+    }
+
+    public function testChannelMapNumericValueIsRejectedWithAnError(): void
+    {
+        $resolved = $this->createImporter()->resolve(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            ['example-legacy-channel' => 12345],
+        );
+
+        self::assertNotEmpty($resolved['errors']);
+        self::assertNull($resolved['overtime']);
+    }
+
+    public function testChannelMapEmptyStringValueIsRejectedWithAnError(): void
+    {
+        $resolved = $this->createImporter()->resolve(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            ['example-legacy-channel' => ''],
+        );
+
+        self::assertNotEmpty($resolved['errors']);
+        self::assertNull($resolved['overtime']);
+    }
+
+    public function testChannelMapOversizedValueIsRejectedWithAnError(): void
+    {
+        $resolved = $this->createImporter()->resolve(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            ['example-legacy-channel' => str_repeat('C', 256)],
+        );
+
+        self::assertNotEmpty($resolved['errors']);
+        self::assertNull($resolved['overtime']);
+    }
+
+    public function testInvalidChannelMapValueDoesNotSilentlyDropMailApiRow(): void
+    {
+        $resolved = $this->createImporter()->resolve(
+            [],
+            [$this->exampleMailApiRows()[0]],
+            [
+                'dating_channel' => 'unused-channel',
+                'overtime_message' => 'Example overtime message.',
+                'overtime_channel' => 'unused-channel',
+            ],
+            [
+                'unused-channel' => 'C0000000000',
+                'example-legacy-channel' => str_repeat('C', 256),
+            ],
+        );
+
+        // The one mail_api row (id 40) references
+        // "example-legacy-channel", whose mapped value is oversized.
+        // It must be excluded from the resolved output, but only with
+        // a matching validation error -- never silently.
+        self::assertSame([], $resolved['mail_api']);
+        self::assertNotEmpty($resolved['errors']);
+        self::assertTrue(
+            array_any(
+                $resolved['errors'],
+                static fn (string $error): bool => str_contains(
+                    $error,
+                    'mail_api.json id 40 is mapped to an invalid channel ID.',
+                ),
+            ),
         );
     }
 }

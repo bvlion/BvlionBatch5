@@ -64,7 +64,15 @@ final class LegacyDataVerifierTest extends TestCase
         );
         $this->connection = $this->connectionFactory->create();
         $this->clearTargetTables();
-        $this->importer = new LegacyDataImporter($this->connectionFactory);
+        $this->importer = new LegacyDataImporter(
+            $this->connectionFactory,
+            expectedDatingCount: 2,
+            expectedMailApiCount: 2,
+            expectedMailApiEnabledCount: 1,
+            expectedMailApiDisabledCount: 1,
+            expectedMailApiNullChannelCount: 1,
+            expectedOvertimeCount: 1,
+        );
         $this->verifier = new LegacyDataVerifier(
             $this->connectionFactory,
             $this->importer,
@@ -149,8 +157,10 @@ final class LegacyDataVerifierTest extends TestCase
         self::assertSame(2, $report['dating']['matched_count']);
         self::assertSame(0, $report['dating']['mismatched_count']);
         self::assertSame(0, $report['dating']['order_mismatch_count']);
+        self::assertSame(0, $report['dating']['required_field_violation_count']);
         self::assertSame(2, $report['mail_api']['matched_count']);
         self::assertSame(0, $report['mail_api']['mismatched_count']);
+        self::assertSame(0, $report['mail_api']['required_field_violation_count']);
         self::assertSame(1, $report['mail_api']['enabled_count_expected']);
         self::assertSame(1, $report['mail_api']['enabled_count_actual']);
         self::assertSame(1, $report['mail_api']['disabled_count_expected']);

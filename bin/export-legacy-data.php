@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 use BvlionBatch5\Database\ConnectionFactory;
+use BvlionBatch5\Migration\LegacyDatabaseEnvironmentLoader;
 use BvlionBatch5\Migration\LegacyJsonFileWriter;
-use Dotenv\Dotenv;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -52,33 +52,19 @@ if (
 }
 
 try {
-    $dotenv = Dotenv::createImmutable(
-        dirname($envFile),
-        basename($envFile),
-    );
-    $dotenv->safeLoad();
-    $dotenv->required([
-        'LEGACY_DB_HOST',
-        'LEGACY_DB_PORT',
-        'LEGACY_DB_NAME',
-        'LEGACY_DB_USER',
-        'LEGACY_DB_PASSWORD',
-    ])->notEmpty();
-} catch (Throwable) {
-    fwrite(
-        STDERR,
-        "Legacy database environment file could not be loaded.\n",
-    );
+    $legacyDatabase = (new LegacyDatabaseEnvironmentLoader())->load($envFile);
+} catch (Throwable $exception) {
+    fwrite(STDERR, $exception->getMessage() . "\n");
     exit(1);
 }
 
 try {
     $connection = (new ConnectionFactory(
-        $_ENV['LEGACY_DB_HOST'],
-        $_ENV['LEGACY_DB_PORT'],
-        $_ENV['LEGACY_DB_NAME'],
-        $_ENV['LEGACY_DB_USER'],
-        $_ENV['LEGACY_DB_PASSWORD'],
+        $legacyDatabase['host'],
+        $legacyDatabase['port'],
+        $legacyDatabase['name'],
+        $legacyDatabase['user'],
+        $legacyDatabase['password'],
     ))->create();
 
     $rows = $connection

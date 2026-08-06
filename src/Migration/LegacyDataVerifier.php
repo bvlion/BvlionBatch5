@@ -32,7 +32,8 @@ final class LegacyDataVerifier
      *         db_count: int,
      *         matched_count: int,
      *         mismatched_count: int,
-     *         order_mismatch_count: int
+     *         order_mismatch_count: int,
+     *         required_field_violation_count: int
      *     }|null,
      *     mail_api: array{
      *         input_count: int,
@@ -40,6 +41,7 @@ final class LegacyDataVerifier
      *         matched_count: int,
      *         mismatched_count: int,
      *         order_mismatch_count: int,
+     *         required_field_violation_count: int,
      *         enabled_count_expected: int,
      *         enabled_count_actual: int,
      *         disabled_count_expected: int,
@@ -90,6 +92,14 @@ final class LegacyDataVerifier
             )->fetchAll(PDO::FETCH_ASSOC),
             ['id', 'target_date', 'message', 'channel_id'],
         );
+        $datingComparison['required_field_violation_count'] = (int) $connection->query(
+            <<<'SQL'
+                SELECT COUNT(*) FROM dating
+                WHERE target_date IS NULL OR target_date = ''
+                   OR message IS NULL OR message = ''
+                   OR channel_id IS NULL OR channel_id = ''
+                SQL,
+        )->fetchColumn();
 
         $mailApiRowsFromDb = $connection->query(
             <<<'SQL'
@@ -103,6 +113,14 @@ final class LegacyDataVerifier
             $mailApiRowsFromDb,
             ['id', 'target_from', 'to_folder', 'channel_id', 'enable_flag'],
         );
+        $mailApiComparison['required_field_violation_count'] = (int) $connection->query(
+            <<<'SQL'
+                SELECT COUNT(*) FROM mail_api
+                WHERE target_from IS NULL OR target_from = ''
+                   OR to_folder IS NULL OR to_folder = ''
+                   OR enable_flag IS NULL
+                SQL,
+        )->fetchColumn();
 
         $expectedEnabledCount = count(array_filter(
             $resolved['mail_api'],

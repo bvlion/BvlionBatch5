@@ -3,26 +3,19 @@
 declare(strict_types=1);
 
 use BvlionBatch5\Database\ConnectionFactory;
+use BvlionBatch5\Migration\LegacyDataFileDecoder;
 use BvlionBatch5\Migration\LegacyDataImporter;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-$readJsonFile = static function (string $path): array {
+$readFile = static function (string $path): string {
     $contents = file_get_contents($path);
 
     if ($contents === false) {
         throw new RuntimeException('Input file could not be read.');
     }
 
-    $decoded = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
-
-    if (!is_array($decoded)) {
-        throw new RuntimeException(
-            'Input file does not contain a JSON array or object.',
-        );
-    }
-
-    return $decoded;
+    return $contents;
 };
 
 $printReport = static function (array $report): void {
@@ -30,20 +23,37 @@ $printReport = static function (array $report): void {
         sprintf('valid: %s', $report['valid'] ? 'true' : 'false'),
         sprintf('dry_run: %s', $report['dry_run'] ? 'true' : 'false'),
         sprintf('executed: %s', $report['executed'] ? 'true' : 'false'),
-        sprintf('dating_count: %d', $report['dating_count']),
-        sprintf('mail_api_count: %d', $report['mail_api_count']),
-        sprintf(
-            'mail_api_null_channel_count: %d',
-            $report['mail_api_null_channel_count'],
-        ),
-        sprintf(
-            'overtime_present: %s',
-            $report['overtime_present'] ? 'true' : 'false',
-        ),
-        sprintf('dating_inserted: %d', $report['dating_inserted']),
-        sprintf('mail_api_inserted: %d', $report['mail_api_inserted']),
-        sprintf('overtime_inserted: %d', $report['overtime_inserted']),
     ];
+
+    foreach ($report['expected_counts'] as $label => $countReport) {
+        $lines[] = sprintf(
+            'expected_counts.%s: expected=%d actual=%d matches=%s',
+            $label,
+            $countReport['expected'],
+            $countReport['actual'],
+            $countReport['matches'] ? 'true' : 'false',
+        );
+    }
+
+    if ($report['existing_counts'] !== null) {
+        foreach ($report['existing_counts'] as $table => $count) {
+            $lines[] = sprintf('existing_counts.%s: %d', $table, $count);
+        }
+    }
+
+    $lines[] = sprintf(
+        'all_tables_empty: %s',
+        $report['all_tables_empty'] === null
+            ? 'unknown'
+            : ($report['all_tables_empty'] ? 'true' : 'false'),
+    );
+    $lines[] = sprintf(
+        'can_execute: %s',
+        $report['can_execute'] ? 'true' : 'false',
+    );
+    $lines[] = sprintf('dating_inserted: %d', $report['dating_inserted']);
+    $lines[] = sprintf('mail_api_inserted: %d', $report['mail_api_inserted']);
+    $lines[] = sprintf('overtime_inserted: %d', $report['overtime_inserted']);
 
     if ($report['abort_reason'] !== null) {
         $lines[] = sprintf('abort_reason: %s', $report['abort_reason']);
@@ -88,13 +98,42 @@ if (
     exit(1);
 }
 
+$decoder = new LegacyDataFileDecoder();
+
 try {
-    $datingRows = $readJsonFile($datingPath);
-    $mailApiRows = $readJsonFile($mailApiPath);
-    $settings = $readJsonFile($settingsPath);
-    $channelMap = $readJsonFile($channelMapPath);
+    $datingDecoded = $decoder->decodeRowListFile(
+        'dating.json',
+        $readFile($datingPath),
+    );
+    $mailApiDecoded = $decoder->decodeRowListFile(
+        'mail_api.json',
+        $readFile($mailApiPath),
+    );
+    $settingsDecoded = $decoder->decodeObjectFile(
+        'migration-settings.json',
+        $readFile($settingsPath),
+    );
+    $channelMapDecoded = $decoder->decodeObjectFile(
+        'channel_map.json',
+        $readFile($channelMapPath),
+    );
 } catch (Throwable) {
     fwrite(STDERR, "Input files could not be read.\n");
+    exit(1);
+}
+
+$decodeErrors = [
+    ...$datingDecoded['errors'],
+    ...$mailApiDecoded['errors'],
+    ...$settingsDecoded['errors'],
+    ...$channelMapDecoded['errors'],
+];
+
+if ($decodeErrors !== []) {
+    foreach ($decodeErrors as $error) {
+        fwrite(STDOUT, sprintf("error: %s\n", $error));
+    }
+
     exit(1);
 }
 
@@ -109,10 +148,10 @@ $importer = new LegacyDataImporter(new ConnectionFactory(
 ));
 
 $report = $importer->import(
-    $datingRows,
-    $mailApiRows,
-    $settings,
-    $channelMap,
+    $datingDecoded['rows'],
+    $mailApiDecoded['rows'],
+    $settingsDecoded['data'],
+    $channelMapDecoded['data'],
     $dryRun,
 );
 $printReport($report);

@@ -11,6 +11,12 @@ final class LegacyDataImporter
 {
     public function __construct(
         private ConnectionFactory $connectionFactory,
+        private int $expectedDatingCount = 4,
+        private int $expectedMailApiCount = 44,
+        private int $expectedMailApiEnabledCount = 43,
+        private int $expectedMailApiDisabledCount = 1,
+        private int $expectedMailApiNullChannelCount = 31,
+        private int $expectedOvertimeCount = 1,
     ) {
     }
 
@@ -40,7 +46,12 @@ final class LegacyDataImporter
      *         enable_flag: int
      *     }>,
      *     mail_api_null_channel_count: int,
-     *     overtime: array{message: string, channel_id: string}|null
+     *     overtime: array{message: string, channel_id: string}|null,
+     *     expected_counts: array<string, array{
+     *         expected: int,
+     *         actual: int,
+     *         matches: bool
+     *     }>
      * }
      */
     public function resolve(
@@ -107,6 +118,50 @@ final class LegacyDataImporter
             static fn (array $a, array $b): int => $a['id'] <=> $b['id'],
         );
 
+        $mailApiEnabledCount = count(array_filter(
+            $resolvedMailApi,
+            static fn (array $row): bool => $row['enable_flag'] === 1,
+        ));
+
+        $expectedCounts = [
+            'dating' => $this->countCheck(
+                'dating.json row count',
+                count($resolvedDating),
+                $this->expectedDatingCount,
+                $errors,
+            ),
+            'mail_api' => $this->countCheck(
+                'mail_api.json row count',
+                count($resolvedMailApi),
+                $this->expectedMailApiCount,
+                $errors,
+            ),
+            'mail_api_enabled' => $this->countCheck(
+                'mail_api.json enabled row count',
+                $mailApiEnabledCount,
+                $this->expectedMailApiEnabledCount,
+                $errors,
+            ),
+            'mail_api_disabled' => $this->countCheck(
+                'mail_api.json disabled row count',
+                count($resolvedMailApi) - $mailApiEnabledCount,
+                $this->expectedMailApiDisabledCount,
+                $errors,
+            ),
+            'mail_api_null_channel' => $this->countCheck(
+                'mail_api.json rows resolving to a null channel_id',
+                $nullChannelCount,
+                $this->expectedMailApiNullChannelCount,
+                $errors,
+            ),
+            'overtime' => $this->countCheck(
+                'overtime settings count',
+                $overtime !== null ? 1 : 0,
+                $this->expectedOvertimeCount,
+                $errors,
+            ),
+        ];
+
         return [
             'errors' => $errors,
             'warnings' => $warnings,
@@ -114,13 +169,15 @@ final class LegacyDataImporter
             'mail_api' => $resolvedMailApi,
             'mail_api_null_channel_count' => $nullChannelCount,
             'overtime' => $overtime,
+            'expected_counts' => $expectedCounts,
         ];
     }
 
     /**
      * Validates, and unless dry-run, imports the legacy data into the
-     * new schema. The target tables must all be empty; otherwise the
-     * run is aborted without writing anything. All inserts happen in
+     * new schema. Whether or not this is a dry run, the target tables
+     * are checked for emptiness and the run is aborted without writing
+     * anything if any of them already has data. All inserts happen in
      * a single transaction, which is rolled back on any failure.
      *
      * @param list<array<string, mixed>> $datingRows
@@ -131,12 +188,16 @@ final class LegacyDataImporter
      *     valid: bool,
      *     errors: list<string>,
      *     warnings: list<string>,
+     *     expected_counts: array<string, array{
+     *         expected: int,
+     *         actual: int,
+     *         matches: bool
+     *     }>,
      *     dry_run: bool,
      *     executed: bool,
-     *     dating_count: int,
-     *     mail_api_count: int,
-     *     mail_api_null_channel_count: int,
-     *     overtime_present: bool,
+     *     existing_counts: array<string, int>|null,
+     *     all_tables_empty: bool|null,
+     *     can_execute: bool,
      *     abort_reason: string|null,
      *     dating_inserted: int,
      *     mail_api_inserted: int,
@@ -161,20 +222,19 @@ final class LegacyDataImporter
             'valid' => $resolved['errors'] === [],
             'errors' => $resolved['errors'],
             'warnings' => $resolved['warnings'],
+            'expected_counts' => $resolved['expected_counts'],
             'dry_run' => $dryRun,
             'executed' => false,
-            'dating_count' => count($resolved['dating']),
-            'mail_api_count' => count($resolved['mail_api']),
-            'mail_api_null_channel_count' =>
-                $resolved['mail_api_null_channel_count'],
-            'overtime_present' => $resolved['overtime'] !== null,
+            'existing_counts' => null,
+            'all_tables_empty' => null,
+            'can_execute' => false,
             'abort_reason' => null,
             'dating_inserted' => 0,
             'mail_api_inserted' => 0,
             'overtime_inserted' => 0,
         ];
 
-        if (!$report['valid'] || $dryRun) {
+        if (!$report['valid']) {
             return $report;
         }
 
@@ -190,16 +250,27 @@ final class LegacyDataImporter
                 ->query('SELECT COUNT(*) FROM overtime_notification_settings')
                 ->fetchColumn(),
         ];
+        $report['existing_counts'] = $existingCounts;
+        $allTablesEmpty = array_sum($existingCounts) === 0;
+        $report['all_tables_empty'] = $allTablesEmpty;
 
-        foreach ($existingCounts as $table => $count) {
-            if ($count > 0) {
-                $report['abort_reason'] = sprintf(
-                    '%s is not empty.',
-                    $table,
-                );
+        if (!$allTablesEmpty) {
+            $nonEmptyTables = array_keys(array_filter(
+                $existingCounts,
+                static fn (int $count): bool => $count > 0,
+            ));
+            $report['abort_reason'] = sprintf(
+                '%s is not empty.',
+                implode(', ', $nonEmptyTables),
+            );
 
-                return $report;
-            }
+            return $report;
+        }
+
+        $report['can_execute'] = true;
+
+        if ($dryRun) {
+            return $report;
         }
 
         $connection->beginTransaction();
@@ -263,6 +334,34 @@ final class LegacyDataImporter
     }
 
     /**
+     * @param list<string> $errors
+     * @return array{expected: int, actual: int, matches: bool}
+     */
+    private function countCheck(
+        string $label,
+        int $actual,
+        int $expected,
+        array &$errors,
+    ): array {
+        $matches = $actual === $expected;
+
+        if (!$matches) {
+            $errors[] = sprintf(
+                '%s: expected %d but found %d.',
+                $label,
+                $expected,
+                $actual,
+            );
+        }
+
+        return [
+            'expected' => $expected,
+            'actual' => $actual,
+            'matches' => $matches,
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $settings
      * @param array<string, mixed> $channelMap
      * @param array<string, true> $usedChannelNames
@@ -304,6 +403,8 @@ final class LegacyDataImporter
             $errors,
             'migration-settings.json: dating_channel is not mapped to '
                 . 'a channel ID.',
+            'migration-settings.json: dating_channel is mapped to an '
+                . 'invalid channel ID.',
         );
         $overtimeChannelId = $this->resolveChannelId(
             $overtimeChannelName,
@@ -312,12 +413,20 @@ final class LegacyDataImporter
             $errors,
             'migration-settings.json: overtime_channel is not mapped to '
                 . 'a channel ID.',
+            'migration-settings.json: overtime_channel is mapped to an '
+                . 'invalid channel ID.',
         );
 
         return [$datingChannelId, $overtimeMessage, $overtimeChannelId];
     }
 
     /**
+     * Resolves a legacy channel name to a new channel ID via
+     * $channelMap. Every code path that drops a row from the
+     * resolved output because a channel name could not be resolved
+     * also appends a matching entry to $errors, so a row is never
+     * silently excluded.
+     *
      * @param array<string, mixed> $channelMap
      * @param array<string, true> $usedChannelNames
      * @param list<string> $errors
@@ -328,6 +437,7 @@ final class LegacyDataImporter
         array &$usedChannelNames,
         array &$errors,
         string $unmappedErrorMessage,
+        string $invalidValueErrorMessage,
     ): ?string {
         if ($channelName === null) {
             return null;
@@ -343,7 +453,17 @@ final class LegacyDataImporter
 
         $channelId = $channelMap[$channelName];
 
-        return is_string($channelId) ? $channelId : null;
+        if (
+            !is_string($channelId)
+            || $channelId === ''
+            || strlen($channelId) > 255
+        ) {
+            $errors[] = $invalidValueErrorMessage;
+
+            return null;
+        }
+
+        return $channelId;
     }
 
     /**
@@ -549,6 +669,11 @@ final class LegacyDataImporter
                     sprintf(
                         'channel_map.json: mail_api.json id %d '
                             . 'references an unmapped channel name.',
+                        $id,
+                    ),
+                    sprintf(
+                        'channel_map.json: mail_api.json id %d is '
+                            . 'mapped to an invalid channel ID.',
                         $id,
                     ),
                 );

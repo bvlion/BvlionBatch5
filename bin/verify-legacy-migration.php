@@ -3,27 +3,20 @@
 declare(strict_types=1);
 
 use BvlionBatch5\Database\ConnectionFactory;
+use BvlionBatch5\Migration\LegacyDataFileDecoder;
 use BvlionBatch5\Migration\LegacyDataImporter;
 use BvlionBatch5\Migration\LegacyDataVerifier;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-$readJsonFile = static function (string $path): array {
+$readFile = static function (string $path): string {
     $contents = file_get_contents($path);
 
     if ($contents === false) {
         throw new RuntimeException('Input file could not be read.');
     }
 
-    $decoded = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
-
-    if (!is_array($decoded)) {
-        throw new RuntimeException(
-            'Input file does not contain a JSON array or object.',
-        );
-    }
-
-    return $decoded;
+    return $contents;
 };
 
 $printReport = static function (array $report): void {
@@ -77,13 +70,42 @@ if (
     exit(1);
 }
 
+$decoder = new LegacyDataFileDecoder();
+
 try {
-    $datingRows = $readJsonFile($datingPath);
-    $mailApiRows = $readJsonFile($mailApiPath);
-    $settings = $readJsonFile($settingsPath);
-    $channelMap = $readJsonFile($channelMapPath);
+    $datingDecoded = $decoder->decodeRowListFile(
+        'dating.json',
+        $readFile($datingPath),
+    );
+    $mailApiDecoded = $decoder->decodeRowListFile(
+        'mail_api.json',
+        $readFile($mailApiPath),
+    );
+    $settingsDecoded = $decoder->decodeObjectFile(
+        'migration-settings.json',
+        $readFile($settingsPath),
+    );
+    $channelMapDecoded = $decoder->decodeObjectFile(
+        'channel_map.json',
+        $readFile($channelMapPath),
+    );
 } catch (Throwable) {
     fwrite(STDERR, "Input files could not be read.\n");
+    exit(1);
+}
+
+$decodeErrors = [
+    ...$datingDecoded['errors'],
+    ...$mailApiDecoded['errors'],
+    ...$settingsDecoded['errors'],
+    ...$channelMapDecoded['errors'],
+];
+
+if ($decodeErrors !== []) {
+    foreach ($decodeErrors as $error) {
+        fwrite(STDOUT, sprintf("error: %s\n", $error));
+    }
+
     exit(1);
 }
 
@@ -101,7 +123,12 @@ $verifier = new LegacyDataVerifier(
     new LegacyDataImporter($connectionFactory),
 );
 
-$report = $verifier->verify($datingRows, $mailApiRows, $settings, $channelMap);
+$report = $verifier->verify(
+    $datingDecoded['rows'],
+    $mailApiDecoded['rows'],
+    $settingsDecoded['data'],
+    $channelMapDecoded['data'],
+);
 $printReport($report);
 
 exit(

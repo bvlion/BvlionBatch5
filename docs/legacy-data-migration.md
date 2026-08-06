@@ -2,13 +2,28 @@
 
 旧BvlionBatch4(`dating`・`mail_api`)と旧HomeServer(残業通知)のデータをBvlionBatch5の本番DBへ移行する手順です。実データ・認証情報・実際のチャンネル名やIDは、このリポジトリのいかなるファイルにも含めません。
 
-以下の手順はすべて、本番相当の環境(XServerのPHP 8.5.5・本番DB)を貴方(リポジトリ運用者)が実行してください。このリポジトリのツールは実行主体になりません。
+以下の手順はすべて貴方(リポジトリ運用者)が実行してください。このリポジトリのツールは実行主体になりません。実行環境は工程によって異なります。
+
+- **エクスポート**(`bin/export-legacy-data.php`)：旧DBへ接続でき、PHP 8.5と`pdo_mysql`拡張が利用できる環境で実行します。XServerから旧DBへ接続できるかどうかは本ドキュメント作成時点では未確認のため、実際にどの環境で実行するかは断定しません。本番マイグレーション適用後、実施時に確認してください。
+- **インポート・検証・本番マイグレーション**(`bin/import-legacy-data.php`・`bin/verify-legacy-migration.php`・`bin/migrate.php`)：本番DBへ書き込む工程のため、XServerのPHP 8.5.5で実行します。
 
 ## 0. 前提
 
 - 移行対象は `dating`・`mail_api`・`overtime_notification_settings` の3テーブルです。
 - `mail_api.channel_id` は本Issueのマイグレーションで `NULL` を許容します。旧環境でSlack投稿がスキップされていた行は、`channel_id = NULL` として移行し、新環境でも同様にSlack投稿だけをスキップします。
 - 旧`dating`・旧`mail_api`の主キー(`pk`)は、新環境の`id`へそのまま引き継ぎます。
+- 2節のスキーマ・集計確認は実施済みです。確認済みの件数は次のとおりです。
+
+  | 項目 | 件数 |
+  | --- | --- |
+  | `dating` 総件数 | 4 |
+  | `mail_api` 総件数 | 44 |
+  | `mail_api.enable_flag = 1`(有効) | 43 |
+  | `mail_api.enable_flag = 0`(無効) | 1 |
+  | 移行後に`channel_id = NULL`となる`mail_api`行 | 31 |
+  | 残業通知設定(新規登録) | 1 |
+
+  `bin/import-legacy-data.php`・`bin/verify-legacy-migration.php`はこれらの件数を既定値として検証し、入力ファイルの件数がこれと一致しない場合は`valid: false`としてDBへ書き込みません。
 
 ## 1. 作業ディレクトリの準備
 
@@ -32,8 +47,8 @@ SHOW CREATE TABLE mail_api;
 ```sql
 SELECT
   COUNT(*) AS total_count,
-  SUM(id IS NULL) AS id_null_count,
-  SUM(id <= 0) AS id_non_positive_count,
+  SUM(pk IS NULL) AS pk_null_count,
+  SUM(pk <= 0) AS pk_non_positive_count,
   SUM(target_date IS NULL) AS target_date_null_count,
   SUM(target_date = '') AS target_date_empty_count,
   SUM(message IS NULL) AS message_null_count,
@@ -48,8 +63,8 @@ SELECT
   SUM(enable_flag = 0) AS enable_flag_0_count,
   SUM(enable_flag IS NULL) AS enable_flag_null_count,
   SUM(enable_flag IS NOT NULL AND enable_flag NOT IN (0, 1)) AS enable_flag_other_count,
-  SUM(id IS NULL) AS id_null_count,
-  SUM(id <= 0) AS id_non_positive_count,
+  SUM(pk IS NULL) AS pk_null_count,
+  SUM(pk <= 0) AS pk_non_positive_count,
   SUM(target_from IS NULL) AS target_from_null_count,
   SUM(target_from = '') AS target_from_empty_count,
   SUM(to_folder IS NULL) AS to_folder_null_count,
@@ -80,17 +95,21 @@ FROM mail_api;
 chmod 600 <migration-work-directory>/legacy-db.env
 ```
 
+`<php-binary>`は、旧DBへ接続できPHP 8.5・`pdo_mysql`が利用できる環境のPHP実行ファイルです(XServerとは限りません。実施時に確認してください)。
+
 ```shell
-/opt/php-8.5.5/bin/php bin/export-legacy-data.php \
+<php-binary> bin/export-legacy-data.php \
   --env-file=<migration-work-directory>/legacy-db.env \
   --table=dating \
   --output=<migration-work-directory>/dating.json
 
-/opt/php-8.5.5/bin/php bin/export-legacy-data.php \
+<php-binary> bin/export-legacy-data.php \
   --env-file=<migration-work-directory>/legacy-db.env \
   --table=mail_api \
   --output=<migration-work-directory>/mail_api.json
 ```
+
+DB接続情報は`--env-file`で指定したファイルからのみ読み込みます。プロセス環境変数に同名の変数が存在していても使用しません。指定ファイルが存在しない・読み取れない・必須項目が欠けている場合は、値を含まないエラーメッセージで終了します。
 
 - 出力ファイルは一時ファイルへ書き込んだ後、成功時のみ完成ファイル名へ`rename`されます。権限は作成時から600です。
 - 完成ファイル・一時ファイルのいずれかが既に存在する場合はエラー終了し、上書きしません。
@@ -134,7 +153,13 @@ chmod 600 <migration-work-directory>/legacy-db.env
   --dry-run
 ```
 
-`valid: true` かつ `dating_count` / `mail_api_count` / `mail_api_null_channel_count` が想定どおりであることを確認してください。この段階ではDBへ一切書き込みません。`valid: false` の場合は `error:` 行を確認し、5節(元の計画)で整理した方針に従って入力ファイルを修正してください。
+`--dry-run`でもDBへ接続し、`dating`・`mail_api`・`overtime_notification_settings`の既存件数を確認します(書き込みは行いません)。次を確認してください。
+
+- `valid: true`
+- `expected_counts.*`の`matches`がすべて`true`(0節の確認済み件数と入力件数が一致していることを表します)
+- `all_tables_empty: true` / `can_execute: true`
+
+`valid: false`の場合は `error:` 行を確認し、4節の方針に従って入力ファイルを修正してください。`all_tables_empty: false`の場合は、対象テーブルに既存データが残っています。原因を確認してから進めてください。
 
 ## 6. バックアップ
 
@@ -164,7 +189,13 @@ chmod 600 <migration-work-directory>/legacy-db.env
   --channel-map=<migration-work-directory>/channel_map.json
 ```
 
-`dating.mismatched_count` / `mail_api.mismatched_count` / `dating.order_mismatch_count` / `mail_api.order_mismatch_count` がいずれも `0`、`mail_api.expected_null_channel_id_count` と `mail_api.actual_null_channel_id_count` が一致、`overtime.matched: true` であることを確認してください。実際の値は一切出力されません。
+次がすべて満たされていることを確認してください。実際の値は一切出力されません。
+
+- `dating.mismatched_count` / `mail_api.mismatched_count` / `dating.order_mismatch_count` / `mail_api.order_mismatch_count` がいずれも `0`
+- `dating.required_field_violation_count` / `mail_api.required_field_violation_count` がいずれも `0`
+- `mail_api.expected_null_channel_id_count` と `mail_api.actual_null_channel_id_count` が一致(31)
+- `mail_api.enabled_count_expected` と `enabled_count_actual` が一致(43)、`disabled_count_expected` と `disabled_count_actual` が一致(1)
+- `overtime.matched: true`
 
 ## 9. 3機能の本番相当確認
 
