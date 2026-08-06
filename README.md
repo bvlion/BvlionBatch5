@@ -184,10 +184,12 @@ docker compose run --rm --no-deps app php bin/check-imap.php
 | --- | --- |
 | `target_from` | 送信者または件名へ部分一致させる文字列 |
 | `to_folder` | INBOXからの移動先フォルダ |
-| `channel_id` | 投稿先のSlackチャンネルID |
+| `channel_id` | 投稿先のSlackチャンネルID。`NULL`の場合はSlack投稿を行わない |
 | `enable_flag` | ルールの有効状態 |
 
 `POST /api/mail/process`は、有効なルールを登録順に処理します。対象メールの件名と`text/plain`本文を整形してSlackへ投稿し、投稿成功後に既読化して指定フォルダへ移動し、INBOXから削除します。Slack投稿に失敗したメールは移動しません。Slack投稿後の移動に失敗した場合は、処理履歴に基づいて次回の実行時にSlackへ再投稿せず、既読化と移動だけを再試行します。
+
+`channel_id`が`NULL`のルールに一致したメールは、Slack投稿を行わずに既読化・フォルダ移動・処理完了記録だけを行います。
 
 処理はHTTPリクエスト内で同期実行し、Bearer Tokenには`SCHEDULER_BEARER_TOKEN`を使用します。応答はHTTP 200のJSONで、全メールの処理結果と失敗件数を返します。
 
@@ -197,6 +199,10 @@ docker compose run --rm --no-deps app php bin/check-imap.php
   "failure_count": 0
 }
 ```
+
+## 旧環境データの移行
+
+旧BvlionBatch4・旧HomeServerのデータを本番DBへ移行する手順は[旧環境データの移行](docs/legacy-data-migration.md)を参照してください。実データ・認証情報はリポジトリへ含めず、移行専用の作業ディレクトリで完結させます。
 
 ## ローカル実行
 

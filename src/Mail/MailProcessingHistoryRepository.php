@@ -106,18 +106,26 @@ class MailProcessingHistoryRepository
     ): void {
         $statement = $this->connectionFactory->create()->prepare(
             <<<'SQL'
-                UPDATE mail_processing_history
-                SET
+                INSERT INTO mail_processing_history (
+                    mailbox_identifier,
+                    uid_validity,
+                    uid,
+                    completed,
+                    completed_at
+                ) VALUES (
+                    :mailbox_identifier,
+                    :uid_validity,
+                    :uid,
+                    1,
+                    CURRENT_TIMESTAMP(6)
+                )
+                ON DUPLICATE KEY UPDATE
                     completed = 1,
                     completed_at = COALESCE(
                         completed_at,
-                        CURRENT_TIMESTAMP(6)
+                        VALUES(completed_at)
                     ),
                     updated_at = CURRENT_TIMESTAMP(6)
-                WHERE mailbox_identifier = :mailbox_identifier
-                  AND uid_validity = :uid_validity
-                  AND uid = :uid
-                  AND slack_posted = 1
                 SQL,
         );
         $statement->execute([

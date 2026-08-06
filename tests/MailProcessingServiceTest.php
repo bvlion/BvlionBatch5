@@ -583,4 +583,193 @@ final class MailProcessingServiceTest extends TestCase
         );
         self::assertCount(0, $requestHistory);
     }
+
+    public function testNullChannelIdSkipsSlackPostButMarksSeenMovedAndCompleted(): void
+    {
+        $mailRuleRepository = $this->createStub(MailRuleRepository::class);
+        $mailRuleRepository->method('findEnabledRules')->willReturn([
+            [
+                'target_from' => 'example-sender',
+                'to_folder' => 'ExampleArchive',
+                'channel_id' => null,
+            ],
+        ]);
+        $mailbox = $this->createMock(ImapMailbox::class);
+        $mailbox
+            ->expects(self::once())
+            ->method('connect')
+            ->with(false, false);
+        $mailbox
+            ->expects(self::once())
+            ->method('getUidValidity')
+            ->willReturn(123456);
+        $mailbox
+            ->expects(self::once())
+            ->method('searchMessages')
+            ->willReturn([
+                [
+                    'uid' => 101,
+                    'sender' => 'example-sender@example.test',
+                    'subject' => 'Example received message.',
+                ],
+            ]);
+        $mailbox->expects(self::never())->method('readMessage');
+        $mailbox
+            ->expects(self::once())
+            ->method('markMessageAsSeen')
+            ->with(101);
+        $mailbox
+            ->expects(self::once())
+            ->method('moveMessage')
+            ->with(101, 'ExampleArchive');
+        $mailbox->expects(self::once())->method('disconnect');
+        $historyRepository = $this->createMock(
+            MailProcessingHistoryRepository::class,
+        );
+        $historyRepository
+            ->expects(self::once())
+            ->method('find')
+            ->with('example-mailbox', 123456, 101)
+            ->willReturn(null);
+        $historyRepository
+            ->expects(self::never())
+            ->method('recordSlackPosted');
+        $historyRepository
+            ->expects(self::once())
+            ->method('markCompleted')
+            ->with('example-mailbox', 123456, 101);
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create(new MockHandler());
+        $handlerStack->push(Middleware::history($requestHistory));
+        $service = new MailProcessingService(
+            $mailRuleRepository,
+            $mailbox,
+            new MimeMessageDecoder(),
+            $historyRepository,
+            new SlackClient(
+                new Client(['handler' => $handlerStack]),
+                'xoxb-example-bot-token',
+            ),
+            'example-mailbox',
+        );
+
+        $result = $service->process();
+
+        self::assertSame(
+            ['success' => true, 'failure_count' => 0],
+            $result,
+        );
+        self::assertCount(0, $requestHistory);
+    }
+
+    public function testNullChannelIdRetriesMoveWithoutPostingToSlack(): void
+    {
+        $mailRuleRepository = $this->createStub(MailRuleRepository::class);
+        $mailRuleRepository->method('findEnabledRules')->willReturn([
+            [
+                'target_from' => 'example-sender',
+                'to_folder' => 'ExampleArchive',
+                'channel_id' => null,
+            ],
+        ]);
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create(new MockHandler());
+        $handlerStack->push(Middleware::history($requestHistory));
+        $slackClient = new SlackClient(
+            new Client(['handler' => $handlerStack]),
+            'xoxb-example-bot-token',
+        );
+
+        $firstMailbox = $this->createMock(ImapMailbox::class);
+        $firstMailbox->expects(self::once())->method('connect');
+        $firstMailbox->method('getUidValidity')->willReturn(123456);
+        $firstMailbox->method('searchMessages')->willReturn([
+            [
+                'uid' => 101,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example received message.',
+            ],
+        ]);
+        $firstMailbox->expects(self::never())->method('readMessage');
+        $firstMailbox
+            ->expects(self::once())
+            ->method('markMessageAsSeen')
+            ->with(101);
+        $firstMailbox
+            ->expects(self::once())
+            ->method('moveMessage')
+            ->willThrowException(
+                new RuntimeException('IMAP message move failed.'),
+            );
+        $firstMailbox->expects(self::once())->method('disconnect');
+        $firstHistoryRepository = $this->createMock(
+            MailProcessingHistoryRepository::class,
+        );
+        $firstHistoryRepository->method('find')->willReturn(null);
+        $firstHistoryRepository
+            ->expects(self::never())
+            ->method('recordSlackPosted');
+        $firstHistoryRepository
+            ->expects(self::never())
+            ->method('markCompleted');
+        $firstService = new MailProcessingService(
+            $mailRuleRepository,
+            $firstMailbox,
+            new MimeMessageDecoder(),
+            $firstHistoryRepository,
+            $slackClient,
+            'example-mailbox',
+        );
+
+        self::assertSame(
+            ['success' => false, 'failure_count' => 1],
+            $firstService->process(),
+        );
+
+        $secondMailbox = $this->createMock(ImapMailbox::class);
+        $secondMailbox->expects(self::once())->method('connect');
+        $secondMailbox->method('getUidValidity')->willReturn(123456);
+        $secondMailbox->method('searchMessages')->willReturn([
+            [
+                'uid' => 101,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example received message.',
+            ],
+        ]);
+        $secondMailbox->expects(self::never())->method('readMessage');
+        $secondMailbox
+            ->expects(self::once())
+            ->method('markMessageAsSeen')
+            ->with(101);
+        $secondMailbox
+            ->expects(self::once())
+            ->method('moveMessage')
+            ->with(101, 'ExampleArchive');
+        $secondMailbox->expects(self::once())->method('disconnect');
+        $secondHistoryRepository = $this->createMock(
+            MailProcessingHistoryRepository::class,
+        );
+        $secondHistoryRepository->method('find')->willReturn(null);
+        $secondHistoryRepository
+            ->expects(self::never())
+            ->method('recordSlackPosted');
+        $secondHistoryRepository
+            ->expects(self::once())
+            ->method('markCompleted')
+            ->with('example-mailbox', 123456, 101);
+        $secondService = new MailProcessingService(
+            $mailRuleRepository,
+            $secondMailbox,
+            new MimeMessageDecoder(),
+            $secondHistoryRepository,
+            $slackClient,
+            'example-mailbox',
+        );
+
+        self::assertSame(
+            ['success' => true, 'failure_count' => 0],
+            $secondService->process(),
+        );
+        self::assertCount(0, $requestHistory);
+    }
 }

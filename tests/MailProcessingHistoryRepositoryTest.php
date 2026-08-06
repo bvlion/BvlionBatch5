@@ -267,6 +267,82 @@ final class MailProcessingHistoryRepositoryTest extends TestCase
         );
     }
 
+    public function testMarkCompletedWithoutPriorHistoryCreatesCompletedOnlyRecord(): void
+    {
+        $repository = new MailProcessingHistoryRepository(
+            $this->connectionFactory,
+        );
+        $mailboxIdentifier = 'example-mailbox-skip';
+
+        self::assertNull($repository->find(
+            $mailboxIdentifier,
+            123456,
+            101,
+        ));
+
+        $repository->markCompleted(
+            $mailboxIdentifier,
+            123456,
+            101,
+        );
+
+        self::assertSame(
+            [
+                'slack_posted' => false,
+                'completed' => true,
+                'slack_timestamp' => null,
+            ],
+            $repository->find($mailboxIdentifier, 123456, 101),
+        );
+    }
+
+    public function testMarkCompletedTwiceKeepsFirstCompletedAt(): void
+    {
+        $repository = new MailProcessingHistoryRepository(
+            $this->connectionFactory,
+        );
+        $mailboxIdentifier = 'example-mailbox-completed-at';
+
+        $repository->markCompleted(
+            $mailboxIdentifier,
+            123456,
+            101,
+        );
+
+        $completedAtStatement = $this->connection->prepare(
+            <<<'SQL'
+                SELECT completed_at
+                FROM mail_processing_history
+                WHERE mailbox_identifier = :mailbox_identifier
+                  AND uid_validity = :uid_validity
+                  AND uid = :uid
+                SQL,
+        );
+        $completedAtStatement->execute([
+            'mailbox_identifier' => $mailboxIdentifier,
+            'uid_validity' => 123456,
+            'uid' => 101,
+        ]);
+        $firstCompletedAt = $completedAtStatement->fetchColumn();
+
+        $repository->markCompleted(
+            $mailboxIdentifier,
+            123456,
+            101,
+        );
+
+        $completedAtStatement->execute([
+            'mailbox_identifier' => $mailboxIdentifier,
+            'uid_validity' => 123456,
+            'uid' => 101,
+        ]);
+
+        self::assertSame(
+            $firstCompletedAt,
+            $completedAtStatement->fetchColumn(),
+        );
+    }
+
     public function testSchemaStoresNoMailContent(): void
     {
         $columns = $this->connection->query(
