@@ -1,0 +1,2 @@
+ALTER TABLE mail_api
+    MODIFY COLUMN channel_id VARCHAR(255) NULL;

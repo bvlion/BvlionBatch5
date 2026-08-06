@@ -36,7 +36,7 @@ class MailRuleRepository
      * @return list<array{
      *     target_from: string,
      *     to_folder: string,
-     *     channel_id: string
+     *     channel_id: string|null
      * }>
      */
     public function findEnabledRules(): array

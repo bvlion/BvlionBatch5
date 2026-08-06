@@ -74,7 +74,10 @@ final class MailProcessingService
                             continue;
                         }
 
-                        if (($history['slack_posted'] ?? false) !== true) {
+                        if (
+                            ($history['slack_posted'] ?? false) !== true
+                            && $rule['channel_id'] !== null
+                        ) {
                             $content = $this->mailbox->readMessage(
                                 $message['uid'],
                                 $this->mimeMessageDecoder,
