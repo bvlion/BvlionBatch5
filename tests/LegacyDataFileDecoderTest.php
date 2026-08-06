@@ -108,6 +108,22 @@ final class LegacyDataFileDecoderTest extends TestCase
         self::assertSame([], $result['data']);
     }
 
+    public function testRejectsAnEmptyArrayAsAnObjectFile(): void
+    {
+        // `[]` and `{}` are indistinguishable once decoded in assoc
+        // mode, which is exactly why decodeObjectFile() decodes
+        // without assoc mode first. An empty JSON array must still be
+        // rejected even though it decodes to the same empty PHP array
+        // as `{}` would under assoc mode.
+        $result = (new LegacyDataFileDecoder())->decodeObjectFile(
+            'channel_map.json',
+            '[]',
+        );
+
+        self::assertNotEmpty($result['errors']);
+        self::assertSame([], $result['data']);
+    }
+
     public function testRejectsInvalidJsonWithoutThrowing(): void
     {
         $result = (new LegacyDataFileDecoder())->decodeObjectFile(

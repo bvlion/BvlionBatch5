@@ -436,4 +436,77 @@ final class LegacyDataImporterTest extends TestCase
             ),
         );
     }
+
+    public function testIsSuccessfulForDryRunWithAllTablesEmpty(): void
+    {
+        $report = $this->createImporter()->import(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            $this->exampleChannelMap(),
+            true,
+        );
+
+        self::assertTrue(LegacyDataImporter::isSuccessful($report));
+    }
+
+    public function testIsNotSuccessfulForDryRunWhenATableIsNotEmpty(): void
+    {
+        $this->connection->exec(
+            "INSERT INTO dating (target_date, message, channel_id) "
+                . "VALUES ('0101', 'Existing.', 'C0000000000')",
+        );
+
+        $report = $this->createImporter()->import(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            $this->exampleChannelMap(),
+            true,
+        );
+
+        self::assertTrue($report['valid']);
+        self::assertFalse(LegacyDataImporter::isSuccessful($report));
+    }
+
+    public function testIsSuccessfulForARealRunThatExecuted(): void
+    {
+        $report = $this->createImporter()->import(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            $this->exampleChannelMap(),
+            false,
+        );
+
+        self::assertTrue(LegacyDataImporter::isSuccessful($report));
+    }
+
+    public function testIsNotSuccessfulWhenARealRunIsAbortedOrFails(): void
+    {
+        $this->connection->exec(
+            "INSERT INTO dating (target_date, message, channel_id) "
+                . "VALUES ('0101', 'Existing.', 'C0000000000')",
+        );
+
+        $abortedReport = $this->createImporter()->import(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            $this->exampleChannelMap(),
+            false,
+        );
+
+        self::assertFalse(LegacyDataImporter::isSuccessful($abortedReport));
+
+        $invalidReport = $this->createImporter()->import(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            [],
+            false,
+        );
+
+        self::assertFalse(LegacyDataImporter::isSuccessful($invalidReport));
+    }
 }

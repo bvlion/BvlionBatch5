@@ -156,8 +156,4 @@ $report = $importer->import(
 );
 $printReport($report);
 
-exit(
-    $report['valid'] && ($dryRun || $report['executed'])
-        ? 0
-        : 1
-);
+exit(LegacyDataImporter::isSuccessful($report) ? 0 : 1);

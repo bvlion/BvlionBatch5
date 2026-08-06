@@ -334,6 +334,22 @@ final class LegacyDataImporter
     }
 
     /**
+     * Determines whether an import() report represents a successful
+     * outcome for the mode it ran in: for a dry run, the pre-checks
+     * must have passed (valid input, all target tables empty); for a
+     * real run, the insert must actually have executed.
+     *
+     * @param array<string, mixed> $report the array returned by import(),
+     *     read for its 'valid', 'can_execute', 'dry_run' and 'executed' keys
+     */
+    public static function isSuccessful(array $report): bool
+    {
+        return $report['valid']
+            && $report['can_execute']
+            && ($report['dry_run'] || $report['executed']);
+    }
+
+    /**
      * @param list<string> $errors
      * @return array{expected: int, actual: int, matches: bool}
      */
