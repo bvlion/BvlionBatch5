@@ -106,14 +106,18 @@ final class LegacyMailApiDisplayBackfiller
         $report['can_execute'] =
             $report['mismatched_count'] === 0
             && $report['conflict_count'] === 0
-            && $report['input_count'] > 0;
+            && $report['input_count'] > 0
+            && $report['input_count'] === $report['db_count'];
 
         if (!$report['can_execute']) {
             $report['abort_reason'] = sprintf(
                 'Input rows did not safely match the database: '
-                    . '%d mismatched, %d conflicting.',
+                    . '%d mismatched, %d conflicting, '
+                    . '%d input rows vs %d database rows.',
                 $report['mismatched_count'],
                 $report['conflict_count'],
+                $report['input_count'],
+                $report['db_count'],
             );
 
             return $report;

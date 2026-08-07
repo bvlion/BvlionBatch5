@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace BvlionBatch5\Mail;
 
+use DateTimeImmutable;
 use RuntimeException;
 
 /**
- * Converts a legacy BvlionBatch4 prefix_format pattern (an Apache
- * Commons FastDateFormat / java.text.SimpleDateFormat pattern) into
- * an equivalent PHP DateTimeInterface::format() pattern. PHP's own
- * format() uses different letters for the same meaning, so the
- * legacy pattern cannot be passed to it directly.
+ * Formats a DateTimeImmutable using a legacy BvlionBatch4 prefix_format
+ * pattern (an Apache Commons FastDateFormat / java.text.SimpleDateFormat
+ * pattern). PHP's own DateTimeInterface::format() uses different letters
+ * for the same meaning, and has no directive for a non-zero-padded
+ * minute or second, so the legacy pattern cannot simply be translated
+ * into a PHP format string and passed to format() as-is; each token is
+ * instead resolved and rendered directly against the given date.
  *
  * Only the token set needed to reproduce the old mail Slack display
  * name (year, month, day, hour, minute, second and literal text) is
@@ -21,11 +24,11 @@ use RuntimeException;
  */
 final class LegacyDateFormatConverter
 {
-    public function toPhpFormat(string $legacyFormat): string
+    public function format(DateTimeImmutable $date, string $legacyFormat): string
     {
         $characters = mb_str_split($legacyFormat, 1, 'UTF-8');
         $length = count($characters);
-        $phpFormat = '';
+        $result = '';
         $index = 0;
 
         while ($index < $length) {
@@ -36,7 +39,7 @@ final class LegacyDateFormatConverter
                     $characters,
                     $index,
                 );
-                $phpFormat .= $this->escapeLiteral($literal);
+                $result .= $literal;
 
                 continue;
             }
@@ -51,7 +54,8 @@ final class LegacyDateFormatConverter
                     $index++;
                 }
 
-                $phpFormat .= $this->convertToken(
+                $result .= $this->formatToken(
+                    $date,
                     $character,
                     $index - $runStart,
                 );
@@ -59,34 +63,54 @@ final class LegacyDateFormatConverter
                 continue;
             }
 
-            $phpFormat .= $this->escapeLiteral($character);
+            $result .= $character;
             $index++;
         }
 
-        return $phpFormat;
+        return $result;
     }
 
-    private function convertToken(string $character, int $count): string
-    {
+    /**
+     * Renders a single FastDateFormat token run. FastDateFormat's
+     * Number rule treats the pattern letter count as the minimum digit
+     * count: a single letter (e.g. "m") is not zero-padded, while two
+     * or more (e.g. "mm") is zero-padded to that width.
+     */
+    private function formatToken(
+        DateTimeImmutable $date,
+        string $character,
+        int $count,
+    ): string {
         return match ($character) {
-            'y' => $count === 2 ? 'y' : 'Y',
+            'y' => $count === 2 ? $date->format('y') : $date->format('Y'),
             'M' => match (true) {
                 $count >= 3 => throw new RuntimeException(
                     'prefix_format uses an unsupported month token.',
                 ),
-                $count === 1 => 'n',
-                default => 'm',
+                $count === 1 => $date->format('n'),
+                default => $date->format('m'),
             },
-            'd' => $count === 1 ? 'j' : 'd',
-            'H' => $count === 1 ? 'G' : 'H',
-            'h' => $count === 1 ? 'g' : 'h',
-            'm' => 'i',
-            's' => 's',
+            'd' => $count === 1 ? $date->format('j') : $date->format('d'),
+            'H' => $count === 1 ? $date->format('G') : $date->format('H'),
+            'h' => $count === 1 ? $date->format('g') : $date->format('h'),
+            'm' => $count === 1
+                ? $this->stripLeadingZero($date->format('i'))
+                : $date->format('i'),
+            's' => $count === 1
+                ? $this->stripLeadingZero($date->format('s'))
+                : $date->format('s'),
             default => throw new RuntimeException(sprintf(
                 'prefix_format uses an unsupported token: %s.',
                 $character,
             )),
         };
+    }
+
+    private function stripLeadingZero(string $paddedDigits): string
+    {
+        $stripped = ltrim($paddedDigits, '0');
+
+        return $stripped === '' ? '0' : $stripped;
     }
 
     /**
@@ -116,19 +140,6 @@ final class LegacyDateFormatConverter
         }
 
         return [$literal, $index + 1];
-    }
-
-    private function escapeLiteral(string $literal): string
-    {
-        $escaped = '';
-
-        foreach (mb_str_split($literal, 1, 'UTF-8') as $character) {
-            $escaped .= $this->isAsciiLetter($character) || $character === '\\'
-                ? '\\' . $character
-                : $character;
-        }
-
-        return $escaped;
     }
 
     private function isAsciiLetter(string $character): bool

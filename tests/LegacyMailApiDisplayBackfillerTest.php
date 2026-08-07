@@ -264,6 +264,39 @@ final class LegacyMailApiDisplayBackfillerTest extends TestCase
         self::assertSame('Already Different Bot', $row40UserName);
     }
 
+    public function testExtraDatabaseRowPreventsExecutionEvenWhenAllInputRowsMatch(): void
+    {
+        $this->insertPreExistingRows();
+        $this->connection->exec(
+            <<<'SQL'
+                INSERT INTO mail_api (
+                    id, target_from, to_folder, channel_id, enable_flag
+                ) VALUES (42, 'example-sender-c', 'ExampleArchiveC', NULL, 1)
+                SQL,
+        );
+
+        $report = $this->backfiller->run(
+            $this->exampleMailApiRows(),
+            $this->exampleChannelMap(),
+            false,
+        );
+
+        self::assertTrue($report['valid']);
+        self::assertSame(2, $report['input_count']);
+        self::assertSame(3, $report['db_count']);
+        self::assertSame(0, $report['mismatched_count']);
+        self::assertSame(0, $report['conflict_count']);
+        self::assertFalse($report['can_execute']);
+        self::assertFalse($report['executed']);
+        self::assertNotNull($report['abort_reason']);
+        self::assertSame(0, $report['updated_count']);
+
+        $userName = $this->connection
+            ->query('SELECT user_name FROM mail_api WHERE id = 40')
+            ->fetchColumn();
+        self::assertNull($userName);
+    }
+
     public function testInputRowNotFoundInDatabaseIsMismatched(): void
     {
         $report = $this->backfiller->run(

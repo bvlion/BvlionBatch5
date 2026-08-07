@@ -24,11 +24,9 @@ final class LegacyDateFormatConverterTest extends TestCase
     {
         $converter = new LegacyDateFormatConverter();
 
-        $phpFormat = $converter->toPhpFormat('yyyy/MM/dd HH:mm');
-
         self::assertSame(
             '2026/03/05 07:09',
-            $this->exampleDate()->format($phpFormat),
+            $converter->format($this->exampleDate(), 'yyyy/MM/dd HH:mm'),
         );
     }
 
@@ -36,11 +34,9 @@ final class LegacyDateFormatConverterTest extends TestCase
     {
         $converter = new LegacyDateFormatConverter();
 
-        $phpFormat = $converter->toPhpFormat("'受信 'yyyy-MM-dd");
-
         self::assertSame(
             '受信 2026-03-05',
-            $this->exampleDate()->format($phpFormat),
+            $converter->format($this->exampleDate(), "'受信 'yyyy-MM-dd"),
         );
     }
 
@@ -48,11 +44,12 @@ final class LegacyDateFormatConverterTest extends TestCase
     {
         $converter = new LegacyDateFormatConverter();
 
-        $phpFormat = $converter->toPhpFormat('[yyyy-MM-dd HH:mm] ');
-
         self::assertSame(
             '[2026-03-05 07:09] ',
-            $this->exampleDate()->format($phpFormat),
+            $converter->format(
+                $this->exampleDate(),
+                '[yyyy-MM-dd HH:mm] ',
+            ),
         );
     }
 
@@ -60,18 +57,15 @@ final class LegacyDateFormatConverterTest extends TestCase
     {
         $converter = new LegacyDateFormatConverter();
 
-        $phpFormat = $converter->toPhpFormat("HH''mm");
-
         self::assertSame(
             "07'09",
-            $this->exampleDate()->format($phpFormat),
+            $converter->format($this->exampleDate(), "HH''mm"),
         );
     }
 
     public function testFormatsInAsiaTokyoRegardlessOfSourceTimezone(): void
     {
         $converter = new LegacyDateFormatConverter();
-        $phpFormat = $converter->toPhpFormat('HH:mm');
         $utcDate = new DateTimeImmutable(
             '2026-03-04 22:09:02',
             new DateTimeZone('UTC'),
@@ -79,37 +73,50 @@ final class LegacyDateFormatConverterTest extends TestCase
 
         self::assertSame(
             '07:09',
-            $utcDate
-                ->setTimezone(new DateTimeZone('Asia/Tokyo'))
-                ->format($phpFormat),
+            $converter->format(
+                $utcDate->setTimezone(new DateTimeZone('Asia/Tokyo')),
+                'HH:mm',
+            ),
         );
     }
 
     public function testSingleDigitMonthDayHourTokensAreNotZeroPadded(): void
     {
         $converter = new LegacyDateFormatConverter();
-        $date = new DateTimeImmutable(
-            '2026-03-05 07:09:02',
-            new DateTimeZone('Asia/Tokyo'),
-        );
 
         self::assertSame(
             '2026/3/5 7',
-            $date->format($converter->toPhpFormat('y/M/d H')),
+            $converter->format($this->exampleDate(), 'y/M/d H'),
         );
     }
 
-    public function testMinuteTokenIsAlwaysZeroPadded(): void
+    public function testDoubleDigitMonthDayHourTokensAreZeroPadded(): void
     {
         $converter = new LegacyDateFormatConverter();
-        $date = new DateTimeImmutable(
-            '2026-03-05 07:09:02',
-            new DateTimeZone('Asia/Tokyo'),
-        );
 
         self::assertSame(
-            '09',
-            $date->format($converter->toPhpFormat('m')),
+            '03/05 07',
+            $converter->format($this->exampleDate(), 'MM/dd HH'),
+        );
+    }
+
+    public function testSingleDigitMinuteAndSecondTokensAreNotZeroPadded(): void
+    {
+        $converter = new LegacyDateFormatConverter();
+
+        self::assertSame(
+            '9:2',
+            $converter->format($this->exampleDate(), 'm:s'),
+        );
+    }
+
+    public function testDoubleDigitMinuteAndSecondTokensAreZeroPadded(): void
+    {
+        $converter = new LegacyDateFormatConverter();
+
+        self::assertSame(
+            '09:02',
+            $converter->format($this->exampleDate(), 'mm:ss'),
         );
     }
 
@@ -119,7 +126,7 @@ final class LegacyDateFormatConverterTest extends TestCase
 
         $this->expectException(RuntimeException::class);
 
-        $converter->toPhpFormat('MMM dd');
+        $converter->format($this->exampleDate(), 'MMM dd');
     }
 
     public function testUnsupportedLetterTokenThrows(): void
@@ -128,7 +135,7 @@ final class LegacyDateFormatConverterTest extends TestCase
 
         $this->expectException(RuntimeException::class);
 
-        $converter->toPhpFormat('EEE yyyy-MM-dd');
+        $converter->format($this->exampleDate(), 'EEE yyyy-MM-dd');
     }
 
     public function testUnterminatedQuotedLiteralThrows(): void
@@ -137,6 +144,6 @@ final class LegacyDateFormatConverterTest extends TestCase
 
         $this->expectException(RuntimeException::class);
 
-        $converter->toPhpFormat("yyyy'MM-dd");
+        $converter->format($this->exampleDate(), "yyyy'MM-dd");
     }
 }

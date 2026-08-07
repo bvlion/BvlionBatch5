@@ -226,6 +226,7 @@ DBへ接続して`mail_api.json`の各行を`id`・`target_from`・`to_folder`�
 - `valid: true`
 - `mismatched_count: 0`(基礎データが一致しない行がある場合は、別環境・別exportを誤って指定していないか確認してください)
 - `conflict_count: 0`(3列のいずれかにすでに期待値と異なる値が入っている行がある場合は、無条件に上書きせずここで停止します)
+- `input_count`と`db_count`が一致していること(`mail_api.json`にない行がDB側に存在する場合も、無条件に上書きせずここで停止します)
 - `can_execute: true`
 - `planned_update_count`が更新予定件数、`already_set_count`がすでに正しい値が入っている件数です。`user_name`・`icon_url`・`prefix_format`・チャンネルIDなどの実際の値は出力されません。
 

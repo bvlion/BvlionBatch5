@@ -220,7 +220,7 @@ final class MailProcessingServiceTest extends TestCase
         );
     }
 
-    public function testMissingReceivedDateWithNonEmptyPrefixFormatFailsMessage(): void
+    public function testMissingReceivedDateWithNonEmptyPrefixFormatFallsBackToPlainUserName(): void
     {
         $mailRuleRepository = $this->createStub(MailRuleRepository::class);
         $mailRuleRepository->method('findEnabledRules')->willReturn([
@@ -248,19 +248,41 @@ final class MailProcessingServiceTest extends TestCase
             'body' => 'Example body.',
             'received_at' => null,
         ]);
-        $mailbox->expects(self::never())->method('markMessageAsSeen');
-        $mailbox->expects(self::never())->method('moveMessage');
+        $mailbox
+            ->expects(self::once())
+            ->method('markMessageAsSeen')
+            ->with(101);
+        $mailbox
+            ->expects(self::once())
+            ->method('moveMessage')
+            ->with(101, 'ExampleArchive');
         $mailbox->expects(self::once())->method('disconnect');
         $historyRepository = $this->createMock(
             MailProcessingHistoryRepository::class,
         );
         $historyRepository->method('find')->willReturn(null);
         $historyRepository
-            ->expects(self::never())
-            ->method('recordSlackPosted');
-        $historyRepository->expects(self::never())->method('markCompleted');
+            ->expects(self::once())
+            ->method('recordSlackPosted')
+            ->with(
+                'example-mailbox',
+                123456,
+                101,
+                '1234567890.123456',
+            );
+        $historyRepository
+            ->expects(self::once())
+            ->method('markCompleted')
+            ->with('example-mailbox', 123456, 101);
         $requestHistory = [];
-        $handlerStack = HandlerStack::create(new MockHandler());
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                '{"ok":true,"ts":"1234567890.123456"}',
+            ),
+        ]);
+        $handlerStack = HandlerStack::create($mockHandler);
         $handlerStack->push(Middleware::history($requestHistory));
         $service = new MailProcessingService(
             $mailRuleRepository,
@@ -274,11 +296,18 @@ final class MailProcessingServiceTest extends TestCase
             'example-mailbox',
         );
 
+        $result = $service->process();
+
         self::assertSame(
-            ['success' => false, 'failure_count' => 1],
-            $service->process(),
+            ['success' => true, 'failure_count' => 0],
+            $result,
         );
-        self::assertCount(0, $requestHistory);
+        $payload = json_decode(
+            (string) $requestHistory[0]['request']->getBody(),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame('Example Forwarder', $payload['username']);
     }
 
     public function testMissingSlackDisplayDataFailsMessage(): void

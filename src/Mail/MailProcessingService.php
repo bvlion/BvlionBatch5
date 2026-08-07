@@ -164,28 +164,22 @@ final class MailProcessingService
      * Reproduces BvlionBatch4's Mail#getSlackUserName(): the display
      * name is the plain user_name when prefix_format is empty, or
      * user_name with the mail's received date appended (formatted per
-     * prefix_format) otherwise. Unlike the old implementation, which
-     * silently fell back to the plain user_name when the received
-     * date was unavailable, this throws so the mail is retried later
-     * instead of posting a display name without its expected date.
+     * prefix_format) otherwise. As in the old implementation, when the
+     * received date cannot be determined this silently falls back to
+     * the plain user_name instead of failing the mail.
      */
     private function buildSlackDisplayName(
         string $userName,
         ?string $prefixFormat,
         ?DateTimeImmutable $receivedAt,
     ): string {
-        if ($prefixFormat === null || $prefixFormat === '') {
+        if ($prefixFormat === null || $prefixFormat === '' || $receivedAt === null) {
             return $userName;
         }
 
-        if ($receivedAt === null) {
-            throw new RuntimeException(
-                'Mail received date could not be determined.',
-            );
-        }
-
-        return $userName . $receivedAt->format(
-            $this->dateFormatConverter->toPhpFormat($prefixFormat),
+        return $userName . $this->dateFormatConverter->format(
+            $receivedAt,
+            $prefixFormat,
         );
     }
 }
