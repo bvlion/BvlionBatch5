@@ -120,6 +120,29 @@ final class LegacyDateFormatConverterTest extends TestCase
         );
     }
 
+    public function testTripleDigitNumericTokensAreZeroPaddedToPatternLength(): void
+    {
+        $converter = new LegacyDateFormatConverter();
+
+        self::assertSame(
+            '005 007 007 009 002',
+            $converter->format(
+                $this->exampleDate(),
+                'ddd HHH hhh mmm sss',
+            ),
+        );
+    }
+
+    public function testDoubleDigitMonthTokenIsZeroPaddedToTwoDigits(): void
+    {
+        $converter = new LegacyDateFormatConverter();
+
+        self::assertSame(
+            '03',
+            $converter->format($this->exampleDate(), 'MM'),
+        );
+    }
+
     public function testUnsupportedMonthNameTokenThrows(): void
     {
         $converter = new LegacyDateFormatConverter();

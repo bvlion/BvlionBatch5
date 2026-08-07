@@ -73,8 +73,8 @@ final class LegacyDateFormatConverter
     /**
      * Renders a single FastDateFormat token run. FastDateFormat's
      * Number rule treats the pattern letter count as the minimum digit
-     * count: a single letter (e.g. "m") is not zero-padded, while two
-     * or more (e.g. "mm") is zero-padded to that width.
+     * count: a single letter (e.g. "m") is not zero-padded, while a
+     * run of N letters (e.g. "mmm") is zero-padded to N digits.
      */
     private function formatToken(
         DateTimeImmutable $date,
@@ -83,22 +83,16 @@ final class LegacyDateFormatConverter
     ): string {
         return match ($character) {
             'y' => $count === 2 ? $date->format('y') : $date->format('Y'),
-            'M' => match (true) {
-                $count >= 3 => throw new RuntimeException(
+            'M' => $count >= 3
+                ? throw new RuntimeException(
                     'prefix_format uses an unsupported month token.',
-                ),
-                $count === 1 => $date->format('n'),
-                default => $date->format('m'),
-            },
-            'd' => $count === 1 ? $date->format('j') : $date->format('d'),
-            'H' => $count === 1 ? $date->format('G') : $date->format('H'),
-            'h' => $count === 1 ? $date->format('g') : $date->format('h'),
-            'm' => $count === 1
-                ? $this->stripLeadingZero($date->format('i'))
-                : $date->format('i'),
-            's' => $count === 1
-                ? $this->stripLeadingZero($date->format('s'))
-                : $date->format('s'),
+                )
+                : $this->formatNumber((int) $date->format('n'), $count),
+            'd' => $this->formatNumber((int) $date->format('j'), $count),
+            'H' => $this->formatNumber((int) $date->format('G'), $count),
+            'h' => $this->formatNumber((int) $date->format('g'), $count),
+            'm' => $this->formatNumber((int) $date->format('i'), $count),
+            's' => $this->formatNumber((int) $date->format('s'), $count),
             default => throw new RuntimeException(sprintf(
                 'prefix_format uses an unsupported token: %s.',
                 $character,
@@ -106,11 +100,15 @@ final class LegacyDateFormatConverter
         };
     }
 
-    private function stripLeadingZero(string $paddedDigits): string
+    /**
+     * Zero-pads a numeric field to at least $count digits, matching
+     * FastDateFormat's Number rule where the pattern letter count is
+     * the minimum digit count (e.g. "ddd" with day 5 renders "005").
+     * A single-letter pattern is left unpadded.
+     */
+    private function formatNumber(int $value, int $count): string
     {
-        $stripped = ltrim($paddedDigits, '0');
-
-        return $stripped === '' ? '0' : $stripped;
+        return $count === 1 ? (string) $value : sprintf('%0' . $count . 'd', $value);
     }
 
     /**
