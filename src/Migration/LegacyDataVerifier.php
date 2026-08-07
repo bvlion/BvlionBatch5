@@ -103,7 +103,9 @@ final class LegacyDataVerifier
 
         $mailApiRowsFromDb = $connection->query(
             <<<'SQL'
-                SELECT id, target_from, to_folder, channel_id, enable_flag
+                SELECT
+                    id, target_from, to_folder, channel_id,
+                    user_name, icon_url, prefix_format, enable_flag
                 FROM mail_api
                 ORDER BY id
                 SQL,
@@ -111,7 +113,10 @@ final class LegacyDataVerifier
         $mailApiComparison = $this->compare(
             $resolved['mail_api'],
             $mailApiRowsFromDb,
-            ['id', 'target_from', 'to_folder', 'channel_id', 'enable_flag'],
+            [
+                'id', 'target_from', 'to_folder', 'channel_id',
+                'user_name', 'icon_url', 'prefix_format', 'enable_flag',
+            ],
         );
         $mailApiComparison['required_field_violation_count'] = (int) $connection->query(
             <<<'SQL'

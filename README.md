@@ -65,16 +65,31 @@ docker compose run --rm app composer migrate
 
 ## Slack App設定
 
+BvlionBatch5専用のSlack App・Botを1つだけ使用します。mail・dating・overtimeの3機能は、すべて同一の`SLACK_BOT_TOKEN`で投稿します。機能ごとに別のApp・Bot・Tokenは作成しません。
+
 本番Slack Appは、次の手順で設定します。
 
 1. Slack Appの「Basic Information」で、Botの表示名とアイコンを設定します。
-2. 「OAuth & Permissions」のBot Token Scopesへ`chat:write`を追加します。`chat:write.customize`は追加しません。
-3. Slack Appを対象のワークスペースへインストールまたは再インストールします。
-4. 通知先とする各チャンネルへSlack Appを追加します。
+2. 「OAuth & Permissions」のBot Token Scopesへ`chat:write`と`chat:write.customize`を追加します。`chat:write.public`は追加しません(投稿先チャンネルへは、後述のとおりBotを明示的に招待して参加させるため不要です)。
+3. Slack Appを対象のワークスペースへインストール、またはScope変更後は再インストールします。Bot Token ScopeはSlack Appの認可情報に紐づくため、`chat:write.customize`をSlack App設定へ追加しただけでは既存のBot Tokenへ反映されません。「OAuth & Permissions」画面で再インストール(reinstall)を実行し、新しいBot Tokenを発行してください。
+4. 通知先とする各チャンネルへSlack Appを招待し、参加させます(`chat:write.public`を使わないため、Botが参加していないチャンネルへは投稿できません)。
 5. Bot Tokenを本番環境の`SLACK_BOT_TOKEN`へ設定します。
 6. 通知先はチャンネルIDで管理し、実際のチャンネル名、チャンネルID、Bot Tokenをリポジトリや共有ログへ記録しません。
 
-投稿にはSlack Web APIの[`chat.postMessage`](https://docs.slack.dev/reference/methods/chat.postMessage)を使用します。表示名、アイコン、チャンネル名はリクエストで上書きしません。
+投稿にはSlack Web APIの[`chat.postMessage`](https://docs.slack.dev/reference/methods/chat.postMessage)を使用します。
+
+- dating・overtimeは、`channel`と`text`だけを指定する通常投稿です。表示名・アイコンはリクエストで上書きせず、Botそのものの表示名・アイコンで投稿されます。
+- mailは、`channel`・`text`に加えて`username`・`icon_url`を指定するカスタム投稿です。旧BvlionBatch4のメール転送元表示(送信元ごとの表示名・アイコン)を復元するため、`chat:write.customize`スコープを使ってメールルールごとに投稿の表示名とアイコンを上書きします。このカスタム表示は、家族内で利用する閉じたワークスペースにおけるメール転送元の識別が目的であり、人間へのなりすましを意図したものではありません。詳細は[メール処理API](#メール処理api)を参照してください。
+
+### Bot Token漏洩時のローテーション
+
+Bot Tokenが漏洩した、または漏洩した疑いがある場合は、次の手順でBvlionBatch5専用Bot単位にローテーションします。実際のTokenやチャンネルIDはいかなる記録にも残しません。
+
+1. Slack Appの管理画面で、BvlionBatch5用Bot Tokenを失効させます。
+2. BvlionBatch5用Slack Appを再認可し、新しいBot Tokenを発行します。
+3. 本番環境の`SLACK_BOT_TOKEN`を新しいTokenへ差し替えます(mail・dating・overtimeの3機能は同じ環境変数を参照しているため、差し替えは1箇所で完了します)。
+4. 通知先とする各チャンネルへ、BvlionBatch5用Slack App・Botが参加した状態のままであることを確認します(`chat:write.public`を使わない構成のため、参加していないチャンネルには投稿できません)。
+5. `bin/check-slack.php`でSlackへの疎通を確認します(「実チャンネルへの疎通確認」節を参照)。
 
 実チャンネルへの疎通確認には`SLACK_BOT_TOKEN`と`SLACK_TEST_CHANNEL_ID`だけを使用します。DB、IMAP、Bearer Tokenなど、アプリ本体の他の環境変数は不要です。
 
@@ -185,11 +200,16 @@ docker compose run --rm --no-deps app php bin/check-imap.php
 | `target_from` | 送信者または件名へ部分一致させる文字列 |
 | `to_folder` | INBOXからの移動先フォルダ |
 | `channel_id` | 投稿先のSlackチャンネルID。`NULL`の場合はSlack投稿を行わない |
+| `user_name` | Slack投稿の表示名(`chat:write.customize`の`username`) |
+| `icon_url` | Slack投稿のアイコン画像URL(`chat:write.customize`の`icon_url`) |
+| `prefix_format` | `user_name`の末尾へ付加する受信日時の書式。空文字列の場合は付加しない |
 | `enable_flag` | ルールの有効状態 |
 
-`POST /api/mail/process`は、有効なルールを登録順に処理します。対象メールの件名と`text/plain`本文を整形してSlackへ投稿し、投稿成功後に既読化して指定フォルダへ移動し、INBOXから削除します。Slack投稿に失敗したメールは移動しません。Slack投稿後の移動に失敗した場合は、処理履歴に基づいて次回の実行時にSlackへ再投稿せず、既読化と移動だけを再試行します。
+`POST /api/mail/process`は、有効なルールを登録順に処理します。対象メールの件名と`text/plain`本文を整形し、旧BvlionBatch4のメール転送元表示を復元した`username`・`icon_url`とともにSlackへ投稿します。投稿成功後に既読化して指定フォルダへ移動し、INBOXから削除します。Slack投稿に失敗したメールは移動しません。Slack投稿後の移動に失敗した場合は、処理履歴に基づいて次回の実行時にSlackへ再投稿せず、既読化と移動だけを再試行します。
 
-`channel_id`が`NULL`のルールに一致したメールは、Slack投稿を行わずに既読化・フォルダ移動・処理完了記録だけを行います。
+`channel_id`が`NULL`のルールに一致したメールは、Slack投稿(および表示名・アイコンの生成)を行わずに既読化・フォルダ移動・処理完了記録だけを行います。
+
+Slack投稿時の表示名は、旧BvlionBatch4の`Mail#getSlackUserName()`と同じ規則で生成します。`prefix_format`が空文字列の場合は`user_name`のみ、空でない場合は`user_name`の末尾へメール受信日時を`Asia/Tokyo`で整形した文字列を付加します。`prefix_format`はJava/Apache Commons `FastDateFormat`(`java.text.SimpleDateFormat`相当)のパターンであり、PHPの`DateTimeInterface::format()`とは記号の意味が異なるため、`BvlionBatch5\Mail\LegacyDateFormatConverter`で互換のPHP書式へ変換してから使用します。受信日時は`imap_fetch_overview()`が返す`udate`(IMAPサーバーのINTERNALDATE)から取得します。旧`receivedDate`と同じ値であり、メールヘッダーの`Date`(送信日時)とは意味が異なるため使用しません。受信日時を取得できない場合、`prefix_format`が空でなければ誤った日時を投稿せずそのメールの処理を失敗として次回に持ち越します。
 
 処理はHTTPリクエスト内で同期実行し、Bearer Tokenには`SCHEDULER_BEARER_TOKEN`を使用します。応答はHTTP 200のJSONで、全メールの処理結果と失敗件数を返します。
 

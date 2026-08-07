@@ -10,6 +10,8 @@ use BvlionBatch5\Mail\MailProcessingService;
 use BvlionBatch5\Mail\MailRuleRepository;
 use BvlionBatch5\Mail\MimeMessageDecoder;
 use BvlionBatch5\Slack\SlackClient;
+use DateTimeImmutable;
+use DateTimeZone;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -20,6 +22,14 @@ use RuntimeException;
 
 final class MailProcessingServiceTest extends TestCase
 {
+    private function exampleReceivedAt(): DateTimeImmutable
+    {
+        return new DateTimeImmutable(
+            '2026-03-05 07:09:02',
+            new DateTimeZone('Asia/Tokyo'),
+        );
+    }
+
     public function testSuccessfulMessageIsPostedSeenMovedAndCompleted(): void
     {
         $mailRuleRepository = $this->createStub(MailRuleRepository::class);
@@ -28,6 +38,9 @@ final class MailProcessingServiceTest extends TestCase
                 'target_from' => 'EXAMPLE-SENDER',
                 'to_folder' => 'ExampleArchive',
                 'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => '',
             ],
         ]);
         $mailbox = $this->createMock(ImapMailbox::class);
@@ -56,6 +69,7 @@ final class MailProcessingServiceTest extends TestCase
             ->willReturn([
                 'subject' => 'Example subject.',
                 'body' => 'Example body.',
+                'received_at' => $this->exampleReceivedAt(),
             ]);
         $mailbox
             ->expects(self::once())
@@ -121,6 +135,8 @@ final class MailProcessingServiceTest extends TestCase
                 'channel' => 'C0000000000',
                 'text' => "件名：Example subject.\n"
                     . "----------\nExample body.\n----------",
+                'username' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
             ],
             json_decode(
                 (string) $requestHistory[0]['request']->getBody(),
@@ -128,6 +144,202 @@ final class MailProcessingServiceTest extends TestCase
                 flags: JSON_THROW_ON_ERROR,
             ),
         );
+    }
+
+    public function testDisplayNameIncludesFormattedReceivedDate(): void
+    {
+        $mailRuleRepository = $this->createStub(MailRuleRepository::class);
+        $mailRuleRepository->method('findEnabledRules')->willReturn([
+            [
+                'target_from' => 'example-sender',
+                'to_folder' => 'ExampleArchive',
+                'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => "'受信 'yyyy/MM/dd HH:mm",
+            ],
+        ]);
+        $mailbox = $this->createMock(ImapMailbox::class);
+        $mailbox->expects(self::once())->method('connect');
+        $mailbox->method('getUidValidity')->willReturn(123456);
+        $mailbox->method('searchMessages')->willReturn([
+            [
+                'uid' => 101,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example received message.',
+            ],
+        ]);
+        $mailbox->method('readMessage')->willReturn([
+            'subject' => 'Example subject.',
+            'body' => 'Example body.',
+            'received_at' => $this->exampleReceivedAt(),
+        ]);
+        $mailbox->method('markMessageAsSeen');
+        $mailbox->method('moveMessage');
+        $mailbox->expects(self::once())->method('disconnect');
+        $historyRepository = $this->createStub(
+            MailProcessingHistoryRepository::class,
+        );
+        $historyRepository->method('find')->willReturn(null);
+        $requestHistory = [];
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                '{"ok":true,"ts":"1234567890.123456"}',
+            ),
+        ]);
+        $handlerStack = HandlerStack::create($mockHandler);
+        $handlerStack->push(Middleware::history($requestHistory));
+        $service = new MailProcessingService(
+            $mailRuleRepository,
+            $mailbox,
+            new MimeMessageDecoder(),
+            $historyRepository,
+            new SlackClient(
+                new Client(['handler' => $handlerStack]),
+                'xoxb-example-bot-token',
+            ),
+            'example-mailbox',
+        );
+
+        $result = $service->process();
+
+        self::assertSame(
+            ['success' => true, 'failure_count' => 0],
+            $result,
+        );
+        $payload = json_decode(
+            (string) $requestHistory[0]['request']->getBody(),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(
+            'Example Forwarder受信 2026/03/05 07:09',
+            $payload['username'],
+        );
+    }
+
+    public function testMissingReceivedDateWithNonEmptyPrefixFormatFailsMessage(): void
+    {
+        $mailRuleRepository = $this->createStub(MailRuleRepository::class);
+        $mailRuleRepository->method('findEnabledRules')->willReturn([
+            [
+                'target_from' => 'example-sender',
+                'to_folder' => 'ExampleArchive',
+                'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => 'yyyy/MM/dd HH:mm',
+            ],
+        ]);
+        $mailbox = $this->createMock(ImapMailbox::class);
+        $mailbox->expects(self::once())->method('connect');
+        $mailbox->method('getUidValidity')->willReturn(123456);
+        $mailbox->method('searchMessages')->willReturn([
+            [
+                'uid' => 101,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example received message.',
+            ],
+        ]);
+        $mailbox->method('readMessage')->willReturn([
+            'subject' => 'Example subject.',
+            'body' => 'Example body.',
+            'received_at' => null,
+        ]);
+        $mailbox->expects(self::never())->method('markMessageAsSeen');
+        $mailbox->expects(self::never())->method('moveMessage');
+        $mailbox->expects(self::once())->method('disconnect');
+        $historyRepository = $this->createMock(
+            MailProcessingHistoryRepository::class,
+        );
+        $historyRepository->method('find')->willReturn(null);
+        $historyRepository
+            ->expects(self::never())
+            ->method('recordSlackPosted');
+        $historyRepository->expects(self::never())->method('markCompleted');
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create(new MockHandler());
+        $handlerStack->push(Middleware::history($requestHistory));
+        $service = new MailProcessingService(
+            $mailRuleRepository,
+            $mailbox,
+            new MimeMessageDecoder(),
+            $historyRepository,
+            new SlackClient(
+                new Client(['handler' => $handlerStack]),
+                'xoxb-example-bot-token',
+            ),
+            'example-mailbox',
+        );
+
+        self::assertSame(
+            ['success' => false, 'failure_count' => 1],
+            $service->process(),
+        );
+        self::assertCount(0, $requestHistory);
+    }
+
+    public function testMissingSlackDisplayDataFailsMessage(): void
+    {
+        $mailRuleRepository = $this->createStub(MailRuleRepository::class);
+        $mailRuleRepository->method('findEnabledRules')->willReturn([
+            [
+                'target_from' => 'example-sender',
+                'to_folder' => 'ExampleArchive',
+                'channel_id' => 'C0000000000',
+                'user_name' => null,
+                'icon_url' => null,
+                'prefix_format' => null,
+            ],
+        ]);
+        $mailbox = $this->createMock(ImapMailbox::class);
+        $mailbox->expects(self::once())->method('connect');
+        $mailbox->method('getUidValidity')->willReturn(123456);
+        $mailbox->method('searchMessages')->willReturn([
+            [
+                'uid' => 101,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example received message.',
+            ],
+        ]);
+        $mailbox->method('readMessage')->willReturn([
+            'subject' => 'Example subject.',
+            'body' => 'Example body.',
+            'received_at' => $this->exampleReceivedAt(),
+        ]);
+        $mailbox->expects(self::never())->method('markMessageAsSeen');
+        $mailbox->expects(self::never())->method('moveMessage');
+        $mailbox->expects(self::once())->method('disconnect');
+        $historyRepository = $this->createMock(
+            MailProcessingHistoryRepository::class,
+        );
+        $historyRepository->method('find')->willReturn(null);
+        $historyRepository
+            ->expects(self::never())
+            ->method('recordSlackPosted');
+        $historyRepository->expects(self::never())->method('markCompleted');
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create(new MockHandler());
+        $handlerStack->push(Middleware::history($requestHistory));
+        $service = new MailProcessingService(
+            $mailRuleRepository,
+            $mailbox,
+            new MimeMessageDecoder(),
+            $historyRepository,
+            new SlackClient(
+                new Client(['handler' => $handlerStack]),
+                'xoxb-example-bot-token',
+            ),
+            'example-mailbox',
+        );
+
+        self::assertSame(
+            ['success' => false, 'failure_count' => 1],
+            $service->process(),
+        );
+        self::assertCount(0, $requestHistory);
     }
 
     public function testNoEnabledRuleDoesNotConnectOrPost(): void
@@ -169,6 +381,9 @@ final class MailProcessingServiceTest extends TestCase
                 'target_from' => 'example-sender',
                 'to_folder' => 'ExampleArchive',
                 'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => '',
             ],
         ]);
         $mailbox = $this->createMock(ImapMailbox::class);
@@ -212,6 +427,9 @@ final class MailProcessingServiceTest extends TestCase
                 'target_from' => 'example-sender',
                 'to_folder' => 'ExampleArchive',
                 'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => '',
             ],
         ]);
         $mailbox = $this->createMock(ImapMailbox::class);
@@ -227,6 +445,7 @@ final class MailProcessingServiceTest extends TestCase
         $mailbox->method('readMessage')->willReturn([
             'subject' => 'Example subject.',
             'body' => 'Example body.',
+            'received_at' => $this->exampleReceivedAt(),
         ]);
         $mailbox->expects(self::never())->method('markMessageAsSeen');
         $mailbox->expects(self::never())->method('moveMessage');
@@ -273,6 +492,9 @@ final class MailProcessingServiceTest extends TestCase
                 'target_from' => 'example-sender',
                 'to_folder' => 'ExampleArchive',
                 'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => '',
             ],
         ]);
         $mailbox = $this->createMock(ImapMailbox::class);
@@ -294,7 +516,7 @@ final class MailProcessingServiceTest extends TestCase
             ->expects(self::exactly(2))
             ->method('readMessage')
             ->willReturnCallback(
-                static function (
+                function (
                     int $uid,
                     MimeMessageDecoder $decoder,
                 ): array {
@@ -314,6 +536,7 @@ final class MailProcessingServiceTest extends TestCase
                     return [
                         'subject' => 'Example successful subject.',
                         'body' => 'Example successful body.',
+                        'received_at' => $this->exampleReceivedAt(),
                     ];
                 },
             );
@@ -383,6 +606,9 @@ final class MailProcessingServiceTest extends TestCase
                 'target_from' => 'example-sender',
                 'to_folder' => 'ExampleArchive',
                 'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => '',
             ],
         ]);
         $mailbox = $this->createMock(ImapMailbox::class);
@@ -398,6 +624,7 @@ final class MailProcessingServiceTest extends TestCase
         $mailbox->method('readMessage')->willReturn([
             'subject' => 'Example subject.',
             'body' => 'Example body.',
+            'received_at' => $this->exampleReceivedAt(),
         ]);
         $mailbox
             ->expects(self::once())
@@ -459,6 +686,9 @@ final class MailProcessingServiceTest extends TestCase
                 'target_from' => 'example-sender',
                 'to_folder' => 'ExampleArchive',
                 'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => '',
             ],
         ]);
         $mailbox = $this->createMock(ImapMailbox::class);
@@ -474,6 +704,7 @@ final class MailProcessingServiceTest extends TestCase
         $mailbox->method('readMessage')->willReturn([
             'subject' => 'Example subject.',
             'body' => 'Example body.',
+            'received_at' => $this->exampleReceivedAt(),
         ]);
         $mailbox->expects(self::once())->method('markMessageAsSeen');
         $mailbox
@@ -525,6 +756,9 @@ final class MailProcessingServiceTest extends TestCase
                 'target_from' => 'example-sender',
                 'to_folder' => 'ExampleArchive',
                 'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => '',
             ],
         ]);
         $mailbox = $this->createMock(ImapMailbox::class);
@@ -592,6 +826,9 @@ final class MailProcessingServiceTest extends TestCase
                 'target_from' => 'example-sender',
                 'to_folder' => 'ExampleArchive',
                 'channel_id' => null,
+                'user_name' => null,
+                'icon_url' => null,
+                'prefix_format' => null,
             ],
         ]);
         $mailbox = $this->createMock(ImapMailbox::class);
@@ -670,6 +907,9 @@ final class MailProcessingServiceTest extends TestCase
                 'target_from' => 'example-sender',
                 'to_folder' => 'ExampleArchive',
                 'channel_id' => null,
+                'user_name' => null,
+                'icon_url' => null,
+                'prefix_format' => null,
             ],
         ]);
         $requestHistory = [];

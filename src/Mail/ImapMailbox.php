@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace BvlionBatch5\Mail;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use IMAP\Connection;
 use RuntimeException;
 
 class ImapMailbox
 {
     private const FOLDER = 'INBOX';
+    private const RECEIVED_AT_TIMEZONE = 'Asia/Tokyo';
 
     /** @var Connection|null */
     private ?object $connection = null;
@@ -214,7 +217,11 @@ class ImapMailbox
     }
 
     /**
-     * @return array{subject: string, body: string}
+     * @return array{
+     *     subject: string,
+     *     body: string,
+     *     received_at: DateTimeImmutable|null
+     * }
      */
     public function readMessage(
         int $uid,
@@ -259,7 +266,28 @@ class ImapMailbox
                     FT_UID | FT_PEEK,
                 ),
             ),
+            'received_at' => $this->extractReceivedAt($overview[0]),
         ];
+    }
+
+    /**
+     * Extracts the message arrival date. imap_fetch_overview()'s
+     * `udate` is documented as the UNIX timestamp of the arrival
+     * date, i.e. the IMAP server's INTERNALDATE -- the same value
+     * JavaMail's Message::getReceivedDate() reads for IMAP messages.
+     * The `date` field (from the Date header) is a different value
+     * and is not used here.
+     */
+    private function extractReceivedAt(object $overview): ?DateTimeImmutable
+    {
+        $udate = $overview->udate ?? null;
+
+        if (!is_numeric($udate)) {
+            return null;
+        }
+
+        return (new DateTimeImmutable('@' . (int) $udate))
+            ->setTimezone(new DateTimeZone(self::RECEIVED_AT_TIMEZONE));
     }
 
     public function markMessageAsSeen(int $uid): void

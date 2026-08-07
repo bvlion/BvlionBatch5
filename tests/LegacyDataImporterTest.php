@@ -207,6 +207,42 @@ final class LegacyDataImporterTest extends TestCase
         self::assertSame(['C0000000000', null], $mailApiChannelIds);
     }
 
+    public function testImportPreservesDisplayColumnsIncludingNulls(): void
+    {
+        $report = $this->createImporter()->import(
+            $this->exampleDatingRows(),
+            $this->exampleMailApiRows(),
+            $this->exampleSettings(),
+            $this->exampleChannelMap(),
+            false,
+        );
+
+        self::assertTrue($report['executed']);
+
+        $mailApiRows = $this->connection
+            ->query(
+                'SELECT user_name, icon_url, prefix_format '
+                    . 'FROM mail_api ORDER BY id',
+            )
+            ->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame(
+            [
+                'user_name' => 'Example Bot',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => '',
+            ],
+            $mailApiRows[0],
+        );
+        self::assertSame(
+            [
+                'user_name' => null,
+                'icon_url' => null,
+                'prefix_format' => null,
+            ],
+            $mailApiRows[1],
+        );
+    }
+
     public function testAbortsWhenTargetTableIsNotEmpty(): void
     {
         $this->connection->exec(
@@ -350,6 +386,40 @@ final class LegacyDataImporterTest extends TestCase
                 ->query('SELECT COUNT(*) FROM mail_api')
                 ->fetchColumn(),
         );
+    }
+
+    public function testOversizedUserNameIsRejectedWithAnError(): void
+    {
+        $rows = $this->exampleMailApiRows();
+        $rows[0]['user_name'] = str_repeat('a', 256);
+
+        $resolved = $this->createImporter()->resolve(
+            [],
+            $rows,
+            $this->exampleSettings(),
+            $this->exampleChannelMap(),
+        );
+
+        self::assertNotEmpty($resolved['errors']);
+        self::assertSame([], array_filter(
+            $resolved['mail_api'],
+            static fn (array $row): bool => $row['id'] === 40,
+        ));
+    }
+
+    public function testOversizedIconUrlIsRejectedWithAnError(): void
+    {
+        $rows = $this->exampleMailApiRows();
+        $rows[0]['icon_url'] = 'https://example.test/' . str_repeat('a', 512);
+
+        $resolved = $this->createImporter()->resolve(
+            [],
+            $rows,
+            $this->exampleSettings(),
+            $this->exampleChannelMap(),
+        );
+
+        self::assertNotEmpty($resolved['errors']);
     }
 
     public function testChannelMapNullValueIsRejectedWithAnError(): void
