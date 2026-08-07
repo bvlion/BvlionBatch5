@@ -120,6 +120,16 @@ final class LegacyDateFormatConverterTest extends TestCase
         );
     }
 
+    public function testYearTokenLengthControlsTruncationAndPadding(): void
+    {
+        $converter = new LegacyDateFormatConverter();
+
+        self::assertSame(
+            '2026 26 2026 2026 02026',
+            $converter->format($this->exampleDate(), 'y yy yyy yyyy yyyyy'),
+        );
+    }
+
     public function testTripleDigitNumericTokensAreZeroPaddedToPatternLength(): void
     {
         $converter = new LegacyDateFormatConverter();

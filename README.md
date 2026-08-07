@@ -209,7 +209,7 @@ docker compose run --rm --no-deps app php bin/check-imap.php
 
 `channel_id`が`NULL`のルールに一致したメールは、Slack投稿(および表示名・アイコンの生成)を行わずに既読化・フォルダ移動・処理完了記録だけを行います。
 
-Slack投稿時の表示名は、旧BvlionBatch4の`Mail#getSlackUserName()`と同じ規則で生成します。`prefix_format`が空文字列の場合は`user_name`のみ、空でない場合は`user_name`の末尾へメール受信日時を`Asia/Tokyo`で整形した文字列を付加します。`prefix_format`はJava/Apache Commons `FastDateFormat`(`java.text.SimpleDateFormat`相当)のパターンであり、PHPの`DateTimeInterface::format()`とは記号の意味が異なるため、`BvlionBatch5\Mail\LegacyDateFormatConverter`で互換のPHP書式へ変換してから使用します。受信日時は`imap_fetch_overview()`が返す`udate`(IMAPサーバーのINTERNALDATE)から取得します。旧`receivedDate`と同じ値であり、メールヘッダーの`Date`(送信日時)とは意味が異なるため使用しません。`prefix_format`が空でないにもかかわらず受信日時を取得できない場合は、旧BvlionBatch4の`MailUtil#getSlackUserName()`と同じく`user_name`のみへフォールバックし、そのままSlack投稿・既読化・フォルダ移動を継続します(メール処理自体は失敗させません)。
+Slack投稿時の表示名は、旧BvlionBatch4の`Mail#getSlackUserName()`と同じ規則で生成します。`prefix_format`が空文字列の場合は`user_name`のみ、空でない場合は`user_name`の末尾へメール受信日時を`Asia/Tokyo`で整形した文字列を付加します。`prefix_format`はJava/Apache Commons `FastDateFormat`(`java.text.SimpleDateFormat`相当)のパターンであり、PHPの`DateTimeInterface::format()`とは記号の意味が異なるため、`BvlionBatch5\Mail\LegacyDateFormatConverter`が旧パターンのトークンを直接解釈し、日時文字列を組み立てます(PHPの書式文字列へ変換して`format()`に渡す方式ではありません)。受信日時は`imap_fetch_overview()`が返す`udate`(IMAPサーバーのINTERNALDATE)から取得します。旧`receivedDate`と同じ値であり、メールヘッダーの`Date`(送信日時)とは意味が異なるため使用しません。`prefix_format`が空でないにもかかわらず受信日時を取得できない場合は、旧BvlionBatch4の`MailUtil#getSlackUserName()`と同じく`user_name`のみへフォールバックし、そのままSlack投稿・既読化・フォルダ移動を継続します(メール処理自体は失敗させません)。
 
 処理はHTTPリクエスト内で同期実行し、Bearer Tokenには`SCHEDULER_BEARER_TOKEN`を使用します。応答はHTTP 200のJSONで、全メールの処理結果と失敗件数を返します。
 

@@ -82,7 +82,9 @@ final class LegacyDateFormatConverter
         int $count,
     ): string {
         return match ($character) {
-            'y' => $count === 2 ? $date->format('y') : $date->format('Y'),
+            'y' => $count === 2
+                ? $date->format('y')
+                : $this->formatNumber((int) $date->format('Y'), $count),
             'M' => $count >= 3
                 ? throw new RuntimeException(
                     'prefix_format uses an unsupported month token.',
