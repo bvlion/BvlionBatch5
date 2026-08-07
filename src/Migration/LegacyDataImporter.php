@@ -43,6 +43,9 @@ final class LegacyDataImporter
      *         target_from: string,
      *         to_folder: string,
      *         channel_id: string|null,
+     *         user_name: string|null,
+     *         icon_url: string|null,
+     *         prefix_format: string|null,
      *         enable_flag: int
      *     }>,
      *     mail_api_null_channel_count: int,
@@ -294,9 +297,11 @@ final class LegacyDataImporter
             $mailApiStatement = $connection->prepare(
                 <<<'SQL'
                     INSERT INTO mail_api (
-                        id, target_from, to_folder, channel_id, enable_flag
+                        id, target_from, to_folder, channel_id,
+                        user_name, icon_url, prefix_format, enable_flag
                     ) VALUES (
-                        :id, :target_from, :to_folder, :channel_id, :enable_flag
+                        :id, :target_from, :to_folder, :channel_id,
+                        :user_name, :icon_url, :prefix_format, :enable_flag
                     )
                     SQL,
             );
@@ -571,12 +576,15 @@ final class LegacyDataImporter
      *         target_from: string,
      *         to_folder: string,
      *         channel_id: string|null,
+     *         user_name: string|null,
+     *         icon_url: string|null,
+     *         prefix_format: string|null,
      *         enable_flag: int
      *     }>,
      *     1: int
      * }
      */
-    private function resolveMailApiRows(
+    public function resolveMailApiRows(
         array $mailApiRows,
         array $channelMap,
         array &$usedChannelNames,
@@ -669,6 +677,36 @@ final class LegacyDataImporter
                 continue;
             }
 
+            if ($userName !== null && strlen($userName) > 255) {
+                $errors[] = sprintf(
+                    'mail_api.json id %d: user_name must be at most 255 '
+                        . 'characters.',
+                    $id,
+                );
+
+                continue;
+            }
+
+            if ($iconUrl !== null && strlen($iconUrl) > 512) {
+                $errors[] = sprintf(
+                    'mail_api.json id %d: icon_url must be at most 512 '
+                        . 'characters.',
+                    $id,
+                );
+
+                continue;
+            }
+
+            if ($prefixFormat !== null && strlen($prefixFormat) > 255) {
+                $errors[] = sprintf(
+                    'mail_api.json id %d: prefix_format must be at most '
+                        . '255 characters.',
+                    $id,
+                );
+
+                continue;
+            }
+
             $channelId = null;
 
             if (
@@ -706,6 +744,9 @@ final class LegacyDataImporter
                 'target_from' => $targetFrom,
                 'to_folder' => $toFolder,
                 'channel_id' => $channelId,
+                'user_name' => $userName,
+                'icon_url' => $iconUrl,
+                'prefix_format' => $prefixFormat,
                 'enable_flag' => $enableFlag,
             ];
         }

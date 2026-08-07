@@ -121,11 +121,37 @@ namespace BvlionBatch5\Mail {
     {
         return true;
     }
+
+    function imap_fetch_overview(
+        object $connection,
+        string $sequence,
+        int $options = 0,
+    ): array|false {
+        return $GLOBALS['bvlion_batch5_next_imap_overview'] ?? false;
+    }
+
+    function imap_fetchstructure(
+        object $connection,
+        int $uid,
+        int $options = 0,
+    ): object|false {
+        return $GLOBALS['bvlion_batch5_next_imap_structure'] ?? false;
+    }
+
+    function imap_fetchbody(
+        object $connection,
+        int $uid,
+        string $section,
+        int $options = 0,
+    ): string|false {
+        return $GLOBALS['bvlion_batch5_next_imap_body'] ?? false;
+    }
 }
 
 namespace BvlionBatch5\Tests {
     use BvlionBatch5\Mail\ImapMailbox;
     use BvlionBatch5\Mail\MimeMessageDecoder;
+    use DateTimeImmutable;
     use PHPUnit\Framework\TestCase;
     use RuntimeException;
 
@@ -459,6 +485,88 @@ namespace BvlionBatch5\Tests {
                 );
                 self::assertFalse(\BvlionBatch5\Mail\imap_errors());
                 self::assertFalse(\BvlionBatch5\Mail\imap_alerts());
+            } finally {
+                $mailbox->disconnect();
+            }
+        }
+
+        public function testReadMessageIncludesReceivedAtFromUdate(): void
+        {
+            $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
+            $GLOBALS['bvlion_batch5_next_imap_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_overview'] = [
+                (object) [
+                    'subject' => 'Example subject.',
+                    'udate' => 1739750942,
+                ],
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_structure'] = (object) [
+                'type' => TYPETEXT,
+                'subtype' => 'PLAIN',
+                'encoding' => ENC7BIT,
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_body'] = 'Example body.';
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+            $mailbox->connect(false, false);
+
+            try {
+                $result = $mailbox->readMessage(
+                    101,
+                    new MimeMessageDecoder(),
+                );
+
+                self::assertInstanceOf(
+                    DateTimeImmutable::class,
+                    $result['received_at'],
+                );
+                self::assertSame(
+                    1739750942,
+                    $result['received_at']->getTimestamp(),
+                );
+                self::assertSame(
+                    'Asia/Tokyo',
+                    $result['received_at']->getTimezone()->getName(),
+                );
+            } finally {
+                $mailbox->disconnect();
+            }
+        }
+
+        public function testReadMessageReturnsNullReceivedAtWhenUdateMissing(): void
+        {
+            $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
+            $GLOBALS['bvlion_batch5_next_imap_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_overview'] = [
+                (object) ['subject' => 'Example subject.'],
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_structure'] = (object) [
+                'type' => TYPETEXT,
+                'subtype' => 'PLAIN',
+                'encoding' => ENC7BIT,
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_body'] = 'Example body.';
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+            $mailbox->connect(false, false);
+
+            try {
+                $result = $mailbox->readMessage(
+                    101,
+                    new MimeMessageDecoder(),
+                );
+
+                self::assertNull($result['received_at']);
             } finally {
                 $mailbox->disconnect();
             }

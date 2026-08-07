@@ -215,6 +215,24 @@ final class LegacyDataVerifierTest extends TestCase
         self::assertSame(1, $report['dating']['mismatched_count']);
     }
 
+    public function testDisplayColumnDifferenceIsDetectedAsMismatch(): void
+    {
+        $this->importFixture();
+        $this->connection->exec(
+            "UPDATE mail_api SET user_name = 'Changed Bot' WHERE id = 40",
+        );
+
+        $report = $this->verifier->verify(
+            $this->datingRows,
+            $this->mailApiRows,
+            $this->settings,
+            $this->channelMap,
+        );
+
+        self::assertSame(1, $report['mail_api']['matched_count']);
+        self::assertSame(2, $report['mail_api']['mismatched_count']);
+    }
+
     public function testInvalidChannelMapReturnsErrorsWithoutQueryingDatabase(): void
     {
         $report = $this->verifier->verify(

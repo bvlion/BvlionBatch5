@@ -36,7 +36,10 @@ class MailRuleRepository
      * @return list<array{
      *     target_from: string,
      *     to_folder: string,
-     *     channel_id: string|null
+     *     channel_id: string|null,
+     *     user_name: string|null,
+     *     icon_url: string|null,
+     *     prefix_format: string|null
      * }>
      */
     public function findEnabledRules(): array
@@ -46,7 +49,10 @@ class MailRuleRepository
                 SELECT
                     target_from,
                     to_folder,
-                    channel_id
+                    channel_id,
+                    user_name,
+                    icon_url,
+                    prefix_format
                 FROM mail_api
                 WHERE enable_flag = 1
                 ORDER BY id

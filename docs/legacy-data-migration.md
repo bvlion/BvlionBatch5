@@ -12,6 +12,7 @@
 - 移行対象は `dating`・`mail_api`・`overtime_notification_settings` の3テーブルです。
 - `mail_api.channel_id` は本Issueのマイグレーションで `NULL` を許容します。旧環境でSlack投稿がスキップされていた行は、`channel_id = NULL` として移行し、新環境でも同様にSlack投稿だけをスキップします。
 - 旧`dating`・旧`mail_api`の主キー(`pk`)は、新環境の`id`へそのまま引き継ぎます。
+- `mail_api`の`user_name`・`icon_url`・`prefix_format`(Slack投稿の表示名・アイコン・受信日時書式)は、Issue #44のマイグレーションで追加した列です。`bin/export-legacy-data.php`は元からこの3項目を`mail_api.json`へ含めているため、エクスポートをやり直す必要はありません。Issue #15で本番へ通常import済みの44件へこの3項目だけを安全に補完する手順は、9節を参照してください。
 - 2節のスキーマ・集計確認は実施済みです。確認済みの件数は次のとおりです。
 
   | 項目 | 件数 |
@@ -197,11 +198,74 @@ DB接続情報は`--env-file`で指定したファイルからのみ読み込み
 - `mail_api.enabled_count_expected` と `enabled_count_actual` が一致(43)、`disabled_count_expected` と `disabled_count_actual` が一致(1)
 - `overtime.matched: true`
 
-## 9. 3機能の本番相当確認
+## 9. 既存44件への表示用データ補完(Issue #44)
 
-READMEの各機能節(記念日通知・メール処理・残業通知)に沿って、本番相当の確認を行ってください。`channel_id`が`NULL`のメール処理ルールに一致するメールは、Slack投稿なしで既読化・移動されることも確認してください。残業通知はSlackへ実際に投稿されるため、実行前に必ず承認を得てから行ってください。
+Issue #15により、本番DBの`mail_api`にはすでに44件が通常import済みです。Issue #44で追加した`user_name`・`icon_url`・`prefix_format`の3列は、この44件では`NULL`のままになっています。この節は、44件を削除・再importせず、この3列だけを安全に補完する手順です。まだ通常importを実施していない環境(初回importで3列も同時に入る)では、この節の作業は不要です。
 
-## 10. 後片付け
+前提として、8節までのマイグレーション適用・通常import・検証が完了していることを確認してください。使用するファイルは3節でエクスポートした既存の`mail_api.json`と、4節で作成した`channel_map.json`です。エクスポート・ファイルの作り直しは不要です。
+
+### 9.1 マイグレーションの適用
+
+Issue #44のマイグレーション(`user_name`・`icon_url`・`prefix_format`列の追加)がまだ適用されていなければ、通常のマイグレーション手順で適用します。
+
+```shell
+/opt/php-8.5.5/bin/php bin/migrate.php
+```
+
+### 9.2 dry-run
+
+```shell
+/opt/php-8.5.5/bin/php bin/backfill-mail-api-display.php \
+  --mail-api=<migration-work-directory>/mail_api.json \
+  --channel-map=<migration-work-directory>/channel_map.json \
+  --dry-run
+```
+
+DBへ接続して`mail_api.json`の各行を`id`・`target_from`・`to_folder`・`channel_id`・`enable_flag`でDB側の行と照合しますが、書き込みは行いません。次を確認してください。
+
+- `valid: true`
+- `mismatched_count: 0`(基礎データが一致しない行がある場合は、別環境・別exportを誤って指定していないか確認してください)
+- `conflict_count: 0`(3列のいずれかにすでに期待値と異なる値が入っている行がある場合は、無条件に上書きせずここで停止します)
+- `input_count`と`db_count`が一致していること(`mail_api.json`にない行がDB側に存在する場合も、無条件に上書きせずここで停止します)
+- `can_execute: true`
+- `planned_update_count`が更新予定件数、`already_set_count`がすでに正しい値が入っている件数です。`user_name`・`icon_url`・`prefix_format`・チャンネルIDなどの実際の値は出力されません。
+
+いずれかの条件を満たさない場合は、`error:`・`abort_reason:`を確認し、原因を解消してから再実行してください。
+
+### 9.3 本実行
+
+dry-runの結果が問題なければ、`--dry-run`を外して本実行します。
+
+```shell
+/opt/php-8.5.5/bin/php bin/backfill-mail-api-display.php \
+  --mail-api=<migration-work-directory>/mail_api.json \
+  --channel-map=<migration-work-directory>/channel_map.json
+```
+
+- 対象は3列(`user_name`・`icon_url`・`prefix_format`)の`UPDATE`のみです。行の削除・`TRUNCATE`・再`INSERT`は行いません。
+- 更新は1トランザクション内で行い、事前照合に不一致(`mismatched_count`または`conflict_count`が0でない)がある場合は、一部だけ更新せず処理全体を中止します。
+- `executed: true`と`updated_count`(実際に更新した件数)を確認してください。
+- このコマンドを誤って再実行しても、すでに正しい値が入っている行は`already_set_count`として扱われ、同じ値を再設定するだけの安全な操作になります。3列に期待値と異なる既存値が入っている行がある場合は、9.2と同様に`conflict_count`で検知され、無条件上書きせず処理全体を中止します。
+
+### 9.4 検証
+
+8節と同じ`bin/verify-legacy-migration.php`で、3列を含めて再検証します。
+
+```shell
+/opt/php-8.5.5/bin/php bin/verify-legacy-migration.php \
+  --dating=<migration-work-directory>/dating.json \
+  --mail-api=<migration-work-directory>/mail_api.json \
+  --settings=<migration-work-directory>/migration-settings.json \
+  --channel-map=<migration-work-directory>/channel_map.json
+```
+
+`mail_api.mismatched_count: 0`を確認してください(`user_name`・`icon_url`・`prefix_format`も比較対象に含まれます)。実際の値は出力されません。
+
+## 10. 3機能の本番相当確認
+
+READMEの各機能節(記念日通知・メール処理・残業通知)に沿って、本番相当の確認を行ってください。`channel_id`が`NULL`のメール処理ルールに一致するメールは、Slack投稿なしで既読化・移動されることも確認してください。Slack投稿ありのメール処理ルールでは、9節で補完した表示名・アイコン・受信日時がSlackへ反映されることも確認してください。残業通知はSlackへ実際に投稿されるため、実行前に必ず承認を得てから行ってください。
+
+## 11. 後片付け
 
 `<migration-work-directory>` 配下のファイル(エクスポート結果、`migration-settings.json`、`channel_map.json`、`legacy-db.env`)をすべて削除してください。
 

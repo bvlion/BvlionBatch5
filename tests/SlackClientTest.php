@@ -163,4 +163,84 @@ final class SlackClientTest extends TestCase
             'Example notification.',
         );
     }
+
+    public function testPostCustomMessageIncludesUsernameAndIconUrl(): void
+    {
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                json_encode(
+                    [
+                        'ok' => true,
+                        'channel' => 'C0000000000',
+                        'ts' => '1234567890.123456',
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+        ]);
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create($mockHandler);
+        $handlerStack->push(Middleware::history($requestHistory));
+        $slackClient = new SlackClient(
+            new Client(['handler' => $handlerStack]),
+            'xoxb-example-bot-token',
+        );
+
+        $timestamp = $slackClient->postCustomMessage(
+            'C0000000000',
+            'Example notification.',
+            'Example Forwarder',
+            'https://example.test/icon.png',
+        );
+
+        self::assertSame('1234567890.123456', $timestamp);
+        self::assertCount(1, $requestHistory);
+        $request = $requestHistory[0]['request'];
+        self::assertSame(
+            [
+                'channel' => 'C0000000000',
+                'text' => 'Example notification.',
+                'username' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+            ],
+            json_decode(
+                (string) $request->getBody(),
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            ),
+        );
+    }
+
+    public function testPostCustomMessageSlackApiErrorIsHandled(): void
+    {
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                json_encode(
+                    [
+                        'ok' => false,
+                        'error' => 'channel_not_found',
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+        ]);
+        $slackClient = new SlackClient(
+            new Client(['handler' => $mockHandler]),
+            'xoxb-example-bot-token',
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Slack API request failed.');
+
+        $slackClient->postCustomMessage(
+            'C0000000000',
+            'Example notification.',
+            'Example Forwarder',
+            'https://example.test/icon.png',
+        );
+    }
 }

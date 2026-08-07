@@ -22,6 +22,39 @@ final class SlackClient
 
     public function postMessage(string $channelId, string $message): string
     {
+        return $this->send([
+            'channel' => $channelId,
+            'text' => $message,
+        ]);
+    }
+
+    /**
+     * Same as postMessage(), but overrides the Bot's display name and
+     * icon for this single post via chat:write.customize. Used only
+     * by mail processing, which identifies each forwarded mail's
+     * original sender this way; dating and overtime notifications
+     * keep using postMessage() and always show the Bot's own name
+     * and icon.
+     */
+    public function postCustomMessage(
+        string $channelId,
+        string $message,
+        string $username,
+        string $iconUrl,
+    ): string {
+        return $this->send([
+            'channel' => $channelId,
+            'text' => $message,
+            'username' => $username,
+            'icon_url' => $iconUrl,
+        ]);
+    }
+
+    /**
+     * @param array<string, string> $payload
+     */
+    private function send(array $payload): string
+    {
         try {
             $response = $this->httpClient->request(
                 'POST',
@@ -30,10 +63,7 @@ final class SlackClient
                     'headers' => [
                         'Authorization' => 'Bearer ' . $this->botToken,
                     ],
-                    'json' => [
-                        'channel' => $channelId,
-                        'text' => $message,
-                    ],
+                    'json' => $payload,
                     'http_errors' => true,
                     'timeout' => self::TIMEOUT_SECONDS,
                 ],
