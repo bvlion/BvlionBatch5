@@ -71,7 +71,7 @@ BvlionBatch5専用のSlack App・Botを1つだけ使用します。mail・dating
 
 1. Slack Appの「Basic Information」で、Botの表示名とアイコンを設定します。
 2. 「OAuth & Permissions」のBot Token Scopesへ`chat:write`と`chat:write.customize`を追加します。`chat:write.public`は追加しません(投稿先チャンネルへは、後述のとおりBotを明示的に招待して参加させるため不要です)。
-3. Slack Appを対象のワークスペースへインストール、またはScope変更後は再インストールします。Bot Token ScopeはSlack Appの認可情報に紐づくため、`chat:write.customize`をSlack App設定へ追加しただけでは既存のBot Tokenへ反映されません。「OAuth & Permissions」画面で再インストール(reinstall)を実行し、新しいBot Tokenを発行してください。
+3. Slack Appを対象のワークスペースへインストール、またはScope変更後は再インストールします。Bot Token ScopeはSlack Appの認可情報に紐づくため、`chat:write.customize`をSlack App設定へ追加しただけでは既存のBot Tokenへ反映されません。「OAuth & Permissions」画面で再インストール(reinstall)を実行してScopeを反映させてください。再インストールしても既存のBot Tokenが必ず新しい値に変わるとは限らないため、実行後に「OAuth & Permissions」画面で現在のBot Tokenを確認し、本番環境の`SLACK_BOT_TOKEN`と一致しているか確認してください(一致していない場合のみ差し替えます)。
 4. 通知先とする各チャンネルへSlack Appを招待し、参加させます(`chat:write.public`を使わないため、Botが参加していないチャンネルへは投稿できません)。
 5. Bot Tokenを本番環境の`SLACK_BOT_TOKEN`へ設定します。
 6. 通知先はチャンネルIDで管理し、実際のチャンネル名、チャンネルID、Bot Tokenをリポジトリや共有ログへ記録しません。

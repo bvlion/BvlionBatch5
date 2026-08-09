@@ -2,10 +2,10 @@
 
 旧BvlionBatch4(`dating`・`mail_api`)と旧HomeServer(残業通知)のデータをBvlionBatch5の本番DBへ移行する手順です。実データ・認証情報・実際のチャンネル名やIDは、このリポジトリのいかなるファイルにも含めません。
 
-以下の手順はすべて貴方(リポジトリ運用者)が実行してください。このリポジトリのツールは実行主体になりません。実行環境は工程によって異なります。
+以下の手順はすべて貴方(リポジトリ運用者)が実行してください。このリポジトリのツールは実行主体になりません。本番移行では、エクスポート・インポート・検証・本番マイグレーションのすべての工程をXServer上のPHP 8.5.5 CLI(`/opt/php-8.5.5/bin/php`)で実行しました。
 
-- **エクスポート**(`bin/export-legacy-data.php`)：旧DBへ接続でき、PHP 8.5と`pdo_mysql`拡張が利用できる環境で実行します。XServerから旧DBへ接続できるかどうかは本ドキュメント作成時点では未確認のため、実際にどの環境で実行するかは断定しません。本番マイグレーション適用後、実施時に確認してください。
-- **インポート・検証・本番マイグレーション**(`bin/import-legacy-data.php`・`bin/verify-legacy-migration.php`・`bin/migrate.php`)：本番DBへ書き込む工程のため、XServerのPHP 8.5.5で実行します。
+- **エクスポート**(`bin/export-legacy-data.php`)：旧DBへの接続は、XServerから旧GCP MySQLへのSSHトンネルを経由しました。トンネルの接続先ホスト・ポートなど具体的な接続情報はこのドキュメントに記載しません。
+- **インポート・検証・本番マイグレーション**(`bin/import-legacy-data.php`・`bin/verify-legacy-migration.php`・`bin/migrate.php`)：本番DBへ書き込む工程のため、同じくXServerのPHP 8.5.5で実行しました。
 
 ## 0. 前提
 
@@ -35,6 +35,8 @@ mkdir -m 700 <migration-work-directory>
 ```
 
 このディレクトリの直下に作成するファイルはすべて権限600とし、移行完了後に削除します。
+
+各`bin/*.php`スクリプトへパスを渡す際は、`$HOME`または絶対パスを使用してください。シェルは`--env-file=~/...`のように`--`から始まるオプション引数内の`~`をチルダ展開の対象としないため、`~`を含むパスを指定しても期待どおり展開されません。
 
 ## 2. 旧DBのスキーマ・集計確認(参考)
 
@@ -96,15 +98,15 @@ FROM mail_api;
 chmod 600 <migration-work-directory>/legacy-db.env
 ```
 
-`<php-binary>`は、旧DBへ接続できPHP 8.5・`pdo_mysql`が利用できる環境のPHP実行ファイルです(XServerとは限りません。実施時に確認してください)。
+エクスポートはXServerのPHP 8.5.5(`/opt/php-8.5.5/bin/php`)で実行しました。旧DBはXServerから直接到達できないため、`legacy-db.env`の接続先(`LEGACY_DB_HOST`・`LEGACY_DB_PORT`)には、あらかじめ確立したSSHトンネルのローカル側エンドポイントを指定します。トンネルの確立方法・接続先ホストなど具体的な接続情報はこのドキュメントに記載しません。
 
 ```shell
-<php-binary> bin/export-legacy-data.php \
+/opt/php-8.5.5/bin/php bin/export-legacy-data.php \
   --env-file=<migration-work-directory>/legacy-db.env \
   --table=dating \
   --output=<migration-work-directory>/dating.json
 
-<php-binary> bin/export-legacy-data.php \
+/opt/php-8.5.5/bin/php bin/export-legacy-data.php \
   --env-file=<migration-work-directory>/legacy-db.env \
   --table=mail_api \
   --output=<migration-work-directory>/mail_api.json
@@ -164,7 +166,7 @@ DB接続情報は`--env-file`で指定したファイルからのみ読み込み
 
 ## 6. バックアップ
 
-本実行の前に、本番DBのバックアップを取得してください。バックアップ手段はXServerで実際に利用できる方法を確認したうえで選んでください(このドキュメントでは断定しません)。
+本実行の前に、`mysqldump`で本番DBのバックアップを取得します。バックアップファイルは移行作業ディレクトリではなく、Webから公開されない別の安全な場所に権限600で保管してください。取り扱いは11節を参照してください。
 
 ## 7. 本実行
 
@@ -265,16 +267,34 @@ dry-runの結果が問題なければ、`--dry-run`を外して本実行しま�
 
 READMEの各機能節(記念日通知・メール処理・残業通知)に沿って、本番相当の確認を行ってください。`channel_id`が`NULL`のメール処理ルールに一致するメールは、Slack投稿なしで既読化・移動されることも確認してください。Slack投稿ありのメール処理ルールでは、9節で補完した表示名・アイコン・受信日時がSlackへ反映されることも確認してください。残業通知はSlackへ実際に投稿されるため、実行前に必ず承認を得てから行ってください。
 
+本番移行では、記念日通知・残業通知・メール処理の3機能について本番相当確認を完了しています。メール処理では、Slackのカスタム表示名・カスタムアイコン・受信日時の表示、件名・本文の投稿、既読化、日本語フォルダへの移動、および`POST /api/mail/process`の`success: true` / `failure_count: 0`を確認しました。日本語フォルダへの移動は、`imap_mail_move()`へ渡す移動先フォルダ名をUTF7-IMAPへ変換する対応(Issue #46 / PR #47)を適用した状態で確認しています。
+
 ## 11. 後片付け
 
-`<migration-work-directory>` 配下のファイル(エクスポート結果、`migration-settings.json`、`channel_map.json`、`legacy-db.env`)をすべて削除してください。
+Issue #15の完了条件を満たすためのcleanupです。本番移行・9節のbackfill・10節の本番相当確認は完了していますが、このcleanupは本ドキュメント作成時点ではまだ実施していません。
+
+### 削除するもの
+
+- `<migration-work-directory>` 配下のファイル(エクスポート結果の`dating.json`・`mail_api.json`、`migration-settings.json`、`channel_map.json`、`legacy-db.env`)
+- 移行のためだけに作成した一時スクリプトがあれば、それも削除します。
 
 ```shell
 rm -f <migration-work-directory>/*.json <migration-work-directory>/legacy-db.env
 ```
 
+- 3節で旧DBへの接続に使用したSSHトンネルを終了します。終了方法は、トンネルを確立した手段に対応する方法(接続に使ったプロセスの停止など)に従ってください。
+
+### 削除せず残すもの
+
+- 6節で取得した本番DBのバックアップ。移行作業ディレクトリではなく、Webから公開されない別の安全な場所での保管を継続します。保持期間の判断はこのドキュメントの範囲外です。
+
+### このcleanupに含まないもの
+
+- 旧API・旧GCP環境そのものの停止は、本Issueの範囲外です(Issue #18で扱います)。このcleanupを実施した後も、旧API・旧GCP環境は稼働したままで構いません。
+- 既存スケジューラーの呼び出し先切り替えは、本Issueの範囲外です(Issue #16で扱います)。
+
 ## 失敗時の停止・復旧
 
 - **本実行のトランザクション中の失敗**：自動的にロールバックされます。対象テーブルは実行前の状態(空)のまま残るため、入力ファイルを修正したうえで本実行をやり直せます。
-- **本実行の成功後に問題が判明した場合**：`TRUNCATE`による即時のやり直しは案内しません。6節で取得したバックアップからの復元を基本とし、復元手段はXServerで実際に利用できる方法に従ってください。
+- **本実行の成功後に問題が判明した場合**：`TRUNCATE`による即時のやり直しは案内しません。6節で`mysqldump`により取得したバックアップからの復元を基本とし、具体的な復元コマンドはXServerで実際に利用できる方法に従ってください。
 - **3機能の本番相当確認で問題が判明した場合**：残業通知など実際にSlackへ投稿する確認は、問題が解消してから改めて承認のうえ実行してください。
