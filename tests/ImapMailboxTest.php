@@ -490,6 +490,45 @@ namespace BvlionBatch5\Tests {
             }
         }
 
+        public function testMoveMessageConvertsJapaneseFolderNameToUtf7Imap(): void
+        {
+            $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
+            $GLOBALS['bvlion_batch5_next_imap_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_move_result'] = true;
+            $GLOBALS['bvlion_batch5_next_imap_move_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_move_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_expunge_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_expunge_alerts'] = false;
+            $GLOBALS['bvlion_batch5_imap_expunge_call_count'] = 0;
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+            $mailbox->connect(false, false);
+
+            try {
+                $mailbox->moveMessage(101, '日本語フォルダ');
+
+                self::assertSame(
+                    [
+                        'message_numbers' => '101',
+                        'mailbox' => 'INBOX.&ZeVnLIqeMNUwqTDrMMA-',
+                        'flags' => CP_UID,
+                    ],
+                    $GLOBALS['bvlion_batch5_imap_move_arguments'],
+                );
+                self::assertSame(
+                    1,
+                    $GLOBALS['bvlion_batch5_imap_expunge_call_count'],
+                );
+            } finally {
+                $mailbox->disconnect();
+            }
+        }
+
         public function testReadMessageIncludesReceivedAtFromUdate(): void
         {
             $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];

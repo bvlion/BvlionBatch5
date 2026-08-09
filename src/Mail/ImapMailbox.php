@@ -336,10 +336,16 @@ class ImapMailbox
         imap_errors();
         imap_alerts();
 
+        $encodedToFolder = mb_convert_encoding(
+            $toFolder,
+            'UTF7-IMAP',
+            'UTF-8',
+        );
+
         $moved = @imap_mail_move(
             $this->connection,
             (string) $uid,
-            self::FOLDER . '.' . $toFolder,
+            self::FOLDER . '.' . $encodedToFolder,
             CP_UID,
         );
         $moveErrors = imap_errors();
