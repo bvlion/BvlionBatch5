@@ -166,7 +166,7 @@ DB接続情報は`--env-file`で指定したファイルからのみ読み込み
 
 ## 6. バックアップ
 
-本実行の前に、`mysqldump`で本番DBのバックアップを取得します。バックアップファイルは移行作業ディレクトリではなく、Webから公開されない別の安全な場所に権限600で保管してください。取り扱いは11節を参照してください。
+本実行の前に、`mysqldump`で本番DBのバックアップを取得します。本番移行では、`<migration-work-directory>`内にバックアップ取得用の一時スクリプト`backup-production-db.sh`を作成し、`mysqldump`の出力を同ディレクトリ内の`production-before-import.sql`(権限600)として保存しました。この時点では移行作業ディレクトリの外へは移動しません。バックアップの最終的な保管場所への移動、および一時スクリプトの削除は、11節のcleanupで行います。
 
 ## 7. 本実行
 
@@ -271,22 +271,43 @@ READMEの各機能節(記念日通知・メール処理・残業通知)に沿っ
 
 ## 11. 後片付け
 
-Issue #15の完了条件を満たすためのcleanupです。本番移行・9節のbackfill・10節の本番相当確認は完了していますが、このcleanupは本ドキュメント作成時点ではまだ実施していません。
+Issue #15の完了条件を満たすためのcleanupです。本番移行・9節のbackfill・10節の本番相当確認は完了していますが、このcleanupは本ドキュメント作成時点ではまだ実施していません。次の順番で行います。
 
-### 削除するもの
+### 11.1 バックアップの退避
 
-- `<migration-work-directory>` 配下のファイル(エクスポート結果の`dating.json`・`mail_api.json`、`migration-settings.json`、`channel_map.json`、`legacy-db.env`)
-- 移行のためだけに作成した一時スクリプトがあれば、それも削除します。
+`<migration-work-directory>`内の`production-before-import.sql`は削除せず、Webから公開されない別の安全な場所へ移動し、権限600を維持してください。保持期間の判断はこのドキュメントの範囲外です。
 
 ```shell
+mv <migration-work-directory>/production-before-import.sql <backup-storage-directory>/
+chmod 600 <backup-storage-directory>/production-before-import.sql
+```
+
+### 11.2 移行用ファイルの削除
+
+`<migration-work-directory>`内の次のファイルを削除します。
+
+- `backup-production-db.sh`(バックアップ取得用の一時スクリプト。移行専用で以後は不要なため削除します)
+- エクスポート結果の`dating.json`・`mail_api.json`
+- `migration-settings.json`
+- `channel_map.json`
+- `legacy-db.env`
+
+```shell
+rm -f <migration-work-directory>/backup-production-db.sh
 rm -f <migration-work-directory>/*.json <migration-work-directory>/legacy-db.env
 ```
 
-- 3節で旧DBへの接続に使用したSSHトンネルを終了します。終了方法は、トンネルを確立した手段に対応する方法(接続に使ったプロセスの停止など)に従ってください。
+### 11.3 作業ディレクトリの削除
 
-### 削除せず残すもの
+11.1でバックアップを退避し、11.2で移行用ファイルを削除すると`<migration-work-directory>`は空になります。ディレクトリ自体も削除します。
 
-- 6節で取得した本番DBのバックアップ。移行作業ディレクトリではなく、Webから公開されない別の安全な場所での保管を継続します。保持期間の判断はこのドキュメントの範囲外です。
+```shell
+rmdir <migration-work-directory>
+```
+
+### 11.4 SSHトンネルの終了
+
+3節で旧DBへの接続に使用したSSHトンネルを終了します。終了方法は、トンネルを確立した手段に対応する方法(接続に使ったプロセスの停止など)に従ってください。
 
 ### このcleanupに含まないもの
 
