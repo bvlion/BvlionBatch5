@@ -35,6 +35,7 @@ cp .env.example .env
 | `DB_USER` | データベースのユーザー名 |
 | `DB_PASSWORD` | データベースのパスワード |
 | `SLACK_BOT_TOKEN` | Slack Bot Token |
+| `SLACK_TEST_CHANNEL_ID` | Slack疎通確認時に使用するチャンネルID |
 | `IMAP_HOST` | IMAPサーバーのホスト |
 | `IMAP_PORT` | IMAPサーバーのポート |
 | `IMAP_USERNAME` | IMAP接続のユーザー名 |
@@ -42,7 +43,7 @@ cp .env.example .env
 | `SCHEDULER_BEARER_TOKEN` | メール処理・記念日通知用Bearer Token |
 | `OVERTIME_BEARER_TOKEN` | 定型Slack通知用Bearer Token |
 
-すべての環境変数が必須です。本番値は`.env`または実行環境の環境変数で注入し、コミットしません。設定が未指定または空の場合は、秘密値を含めず、該当する環境変数名を示してリクエスト処理を失敗させます。
+`SLACK_TEST_CHANNEL_ID`を除く環境変数は、アプリ本体の動作に必須です。本番値は`.env`または実行環境の環境変数で注入し、コミットしません。設定が未指定または空の場合は、秘密値を含めず、該当する環境変数名を示してリクエスト処理を失敗させます。`SLACK_TEST_CHANNEL_ID`はアプリ本体では使用せず、後述の「実チャンネルへの疎通確認」でのみ使用します。
 
 ## データベースとマイグレーション
 
