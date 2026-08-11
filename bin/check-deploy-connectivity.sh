@@ -3,9 +3,10 @@
 # Side-effect-free post-deploy HTTP connectivity check.
 #
 # Sends an Authorization-header-less POST to the three Bearer-token-protected
-# APIs and verifies each responds HTTP 401. This only proves routing and
-# Bearer Token authentication are working; it never sends a real Bearer
-# Token and never triggers Slack posts, IMAP access, or database writes.
+# APIs and verifies each responds HTTP 401. This only proves routing reaches
+# each endpoint and the Bearer-token-protected endpoint rejects an
+# unauthenticated request with 401; it never sends a real Bearer Token and
+# never triggers Slack posts, IMAP access, or database writes.
 #
 # Usage:
 #   bin/check-deploy-connectivity.sh <base-url>

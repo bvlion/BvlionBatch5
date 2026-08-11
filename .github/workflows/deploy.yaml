@@ -10,7 +10,7 @@ permissions:
 
 # 同一本番環境(XServer)への同時デプロイを防ぐため、タグ名に関わらず固定の
 # concurrency groupを共有する。cancel-in-progress: falseとqueue: maxにより、
-# 実行中のデプロイを打ち切らず、後続のタグpushはFIFOで順番に実行される。
+# 実行中のデプロイを打ち切らず、後続のdeploy runをキューして1つずつ順次実行する。
 concurrency:
   group: production-deploy
   cancel-in-progress: false
@@ -24,10 +24,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # actions/checkout resolves the tag (lightweight or annotated) to the
-      # commit it points to and checks that commit out. Reading HEAD here
-      # (instead of trusting github.sha directly) avoids the known gotcha
-      # where github.sha can be an annotated tag object's own SHA.
+      # actions/checkout後のHEADを、デプロイ対象commitとして明示的に確定する。
       - name: Resolve target commit
         id: resolve
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
