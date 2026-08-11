@@ -8,6 +8,14 @@ on:
 permissions:
   contents: read
 
+# 同一本番環境(XServer)への同時デプロイを防ぐため、タグ名に関わらず固定の
+# concurrency groupを共有する。cancel-in-progress: falseとqueue: maxにより、
+# 実行中のデプロイを打ち切らず、後続のタグpushはFIFOで順番に実行される。
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
