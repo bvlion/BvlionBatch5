@@ -59,6 +59,8 @@ final class DatingNotificationServiceTest extends TestCase
             [
                 'channel' => 'C0000000000',
                 'text' => 'Example annual notification.',
+                'username' => 'dating-bot-20260820',
+                'icon_url' => 'https://4s.ambitious-i.net/icon/life118.png',
             ],
             json_decode(
                 (string) $requestHistory[0]['request']->getBody(),
@@ -120,6 +122,8 @@ final class DatingNotificationServiceTest extends TestCase
             [
                 'channel' => 'C0000000000',
                 'text' => 'Example milestone: 0 days.',
+                'username' => 'dating-bot-20260101',
+                'icon_url' => 'https://4s.ambitious-i.net/icon/life118.png',
             ],
             json_decode(
                 (string) $requestHistory[0]['request']->getBody(),
@@ -131,6 +135,8 @@ final class DatingNotificationServiceTest extends TestCase
             [
                 'channel' => 'C0000000000',
                 'text' => 'Example milestone: 100 days.',
+                'username' => 'dating-bot-20260411',
+                'icon_url' => 'https://4s.ambitious-i.net/icon/life118.png',
             ],
             json_decode(
                 (string) $requestHistory[1]['request']->getBody(),
@@ -271,6 +277,8 @@ final class DatingNotificationServiceTest extends TestCase
                 'channel' => 'C0000000000',
                 'text' => "Example annual notification.\n"
                     . 'Example milestone: 100 days.',
+                'username' => 'dating-bot-20260411',
+                'icon_url' => 'https://4s.ambitious-i.net/icon/life118.png',
             ],
             json_decode(
                 (string) $requestHistory[0]['request']->getBody(),
@@ -282,6 +290,8 @@ final class DatingNotificationServiceTest extends TestCase
             [
                 'channel' => 'C1111111111',
                 'text' => 'Example other channel notification.',
+                'username' => 'dating-bot-20260411',
+                'icon_url' => 'https://4s.ambitious-i.net/icon/life118.png',
             ],
             json_decode(
                 (string) $requestHistory[1]['request']->getBody(),
