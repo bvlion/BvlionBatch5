@@ -293,14 +293,7 @@ make db-wipe CONFIRM=yes
 
 ## 本番デプロイ
 
-本番デプロイは手動で行います。GitHub Actionsは使用しません。理由は次のとおりです。
-
-- 現時点でデプロイ用のGitHub SecretsとWorkflowが存在しません。
-- 手動SSHで配備できる環境が既にあります。
-- デプロイ頻度が高くない個人サービスです。
-- GitHub Actions化には、鍵管理・失敗時対応・ログ設計など、このデプロイ手順を超える検討が追加で必要になります。
-
-GitHub Actions化が必要になった場合は、別Issueとして扱います。
+`v*`形式のGitタグ(例: `v1.0.0`)をpushすると、GitHub Actions(`.github/workflows/deploy.yaml`)がそのタグの指すcommitをXServer本番環境へ自動デプロイします。`main`へのpushやPull Requestではデプロイされません。初回の環境構築(「初回デプロイ」節)は引き続き手動で行いますが、以降の更新デプロイは`v*`タグのpushだけで完了します。詳細は「自動デプロイ(`v*`タグpush)」節を参照してください。
 
 ### 配置の考え方
 
@@ -404,19 +397,54 @@ GitHub Actions化が必要になった場合は、別Issueとして扱います�
 
 8. 「/healthに依存しない疎通確認」を実施します。
 
-### 更新デプロイ
+### 自動デプロイ(`v*`タグpush)
+
+`v*`形式のタグをpushすると、GitHub Actions(`.github/workflows/deploy.yaml`)が次を自動実行します。実行内容は、以前手動で行っていた更新デプロイ手順と同じです。
+
+1. 本番の`<app-directory>`にtracked変更がないことを確認します。ある場合は上書き・resetせずデプロイを失敗させます。
+2. pushされたタグをfetchし、そのタグが最終的に指すcommit(軽量タグ・annotated tagのいずれでも同じ結果になります)へ本番checkoutを切り替えます。実行時点の`origin/main`は使用しません。
+3. `DEPLOY_COMPOSER_PATH`のBvlionBatch5専用Composerと`/opt/php-8.5.5/bin/php`を使い、`composer.lock`に基づいて`--no-dev --optimize-autoloader --classmap-authoritative`で本番依存をインストールします。
+4. `/opt/php-8.5.5/bin/php bin/migrate.php`で未適用マイグレーションを適用します。
+5. `<app-directory>/public/.htaccess`を`public_html`側へ上書きコピーします。`index.php`のシンボリックリンクは初回作成時のものを再利用します。
+6. `bin/check-deploy-connectivity.sh`で3つのAPIへ未認証POSTを送り、すべてHTTP 401であることを確認します。1件でも401以外の場合はworkflow全体を失敗させます(「/healthに依存しない疎通確認」節の「1. 未認証確認」を参照)。
+
+本番の`.env`はworkflowから作成・コピー・上書き・削除しません。既存の`.env`をそのまま使用します。SSHの秘密鍵・接続先・絶対パス・本番URLなどの値は、いずれもGitHub Secretsから取得し、リポジトリへは記録しません。
+
+#### 通常のリリース手順
+
+リリースしたいcommitへタグを作成してpushするだけで、そのcommitがそのまま本番へ反映されます。
 
 ```shell
-cd <app-directory>
-git fetch origin main
-git checkout main
-git pull --ff-only origin main
-/opt/php-8.5.5/bin/php <tools-directory>/composer.phar install --no-dev --optimize-autoloader --classmap-authoritative
-/opt/php-8.5.5/bin/php bin/migrate.php
-cp <app-directory>/public/.htaccess <public_html-directory>/.htaccess
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-`public_html`側の`index.php`は初回作成時のシンボリックリンクを再利用するため、更新デプロイのたびに作り直す必要はありません。一方`.htaccess`は通常ファイルとしてコピーしているため、リポジトリ側の`public/.htaccess`が変更されていなくても、更新デプロイのたびに上書きコピーしてください。更新後は「疎通確認」を実施します。
+#### 必要なGitHub Secrets
+
+自動デプロイを使うには、事前に次のGitHub Secretsをリポジトリへ登録します。
+
+| Secret | 用途 |
+| --- | --- |
+| `DEPLOY_SSH_HOST` | XServerのSSH接続先ホスト |
+| `DEPLOY_SSH_PORT` | SSH接続ポート |
+| `DEPLOY_SSH_USER` | SSH接続ユーザー名 |
+| `DEPLOY_SSH_PRIVATE_KEY` | BvlionBatch5デプロイ専用のSSH秘密鍵 |
+| `DEPLOY_SSH_KNOWN_HOSTS` | 接続先のhost keyを検証するためのknown_hostsエントリ |
+| `DEPLOY_PATH` | 本番アプリ本体(`<app-directory>`)の絶対パス |
+| `DEPLOY_COMPOSER_PATH` | 本番に配置済みのBvlionBatch5専用Composer(`composer.phar`)の絶対パス |
+| `DEPLOY_PUBLIC_PATH` | 公開ディレクトリ(`public_html`)の絶対パス |
+| `DEPLOY_BASE_URL` | デプロイ後の未認証疎通確認に使用する本番URL |
+
+`DEPLOY_PUBLIC_PATH`はIssue #60に列挙されていた既存Secret一覧には含まれていない追加のSecretです。`DEPLOY_PATH`はドキュメントルート外にあるアプリ本体(`<app-directory>`)の絶対パスであり、「配置の考え方」節のとおり公開ディレクトリ(`public_html`)とは別の場所にあるため、`DEPLOY_PATH`から`public_html`の絶対パスを安全に推測して組み立てることはできません。`public/.htaccess`を`public_html`側へ反映するために、公開ディレクトリの絶対パスを保持する専用のSecretとして追加しています。
+
+SSH host key verificationは`DEPLOY_SSH_KNOWN_HOSTS`を使って必ず有効な状態で行い、`StrictHostKeyChecking=no`等での無効化は行いません。
+
+#### 初回設定(利用者側の作業)
+
+1. BvlionBatch5デプロイ専用のSSH鍵ペアを作成します。
+2. 作成した公開鍵を、XServer側の対象アカウントのSSH認証(`~/.ssh/authorized_keys`)へ登録します。
+3. 上記の必要なGitHub Secretsをすべて登録します。
+4. `v*`形式のタグを作成・pushし、GitHub Actionsのデプロイが成功することを確認します。
 
 ### 失敗時にどこまで戻すか
 
@@ -450,15 +478,25 @@ API疎通確認の前に、Slack・IMAPそれぞれの外部サービスへの�
 
 3つのAPIすべてが、Authorizationヘッダーなしで401を返すことを確認します。これで確認できるのは、ルーティングとBearer Token認証による拒否が機能していることです。`Authorization`ヘッダーが`.htaccess`のRewriteによってPHPまで到達しているかどうかは、この時点では確認できません(ヘッダーがまったく転送されていなくても、未指定の場合と同じ401になるためです)。ヘッダー転送の確認は、後述の「認証済み確認」で正しいBearer Tokenを使ったリクエストが成功することによって行います。
 
+`v*`タグによる自動デプロイでは、デプロイ完了後にこの確認を`bin/check-deploy-connectivity.sh`が自動実行し、3件のいずれかが401以外の場合はGitHub Actions全体を失敗させます。このスクリプトはBearer Tokenを一切使用せず、Slack投稿・IMAP処理・DB更新などの副作用も発生させません。GitHub Actions専用ではなく、ローカルやSSH先から手動実行する場合にも同じスクリプトを再利用できます。
+
+```shell
+bin/check-deploy-connectivity.sh https://<domain>
+# または
+DEPLOY_BASE_URL=https://<domain> bin/check-deploy-connectivity.sh
+```
+
+内部では次と同等のcurlリクエストを送り、3件とも`HTTP 401`であることを確認します(いずれか1件でも401以外なら非ゼロ終了します)。
+
 ```shell
 curl -i -X POST https://<domain>/api/mail/process
 curl -i -X POST https://<domain>/api/dating/notify
 curl -i -X POST https://<domain>/api/overtime/notify
 ```
 
-3件とも`HTTP/1.1 401`を確認します。
-
 #### 2. 認証済み確認
+
+この確認は`v*`タグによる自動デプロイには含まれません。正規のBearer Tokenを使った本番APIの実行、`bin/check-slack.php`による実際のSlack投稿、IMAPでのメール既読化・移動などの副作用を伴う確認は、デプロイのたびに自動実行せず、必要な場合だけ利用者が手動で行います。
 
 副作用(実際のSlack投稿・メールの既読化や移動)を発生させない状態を用意したうえで、正規のBearer Tokenを付与して確認します。正しいBearer Tokenを付与したリクエストが期待どおりの応答を返すことにより、`Authorization`ヘッダーが`.htaccess`のRewriteを経由してPHPまで到達していることも合わせて確認できます。
 
