@@ -138,6 +138,9 @@ final class OvertimeNotificationServiceTest extends TestCase
             [
                 'channel' => 'C0000000000',
                 'text' => 'Example overtime notification.',
+                'username' => '麻衣 BOT',
+                'icon_url' =>
+                    'https://ca.slack-edge.com/T03CDHK90-U03CDM42W-b01e6bc14282-512',
             ],
             json_decode(
                 (string) $requestHistory[0]['request']->getBody(),
