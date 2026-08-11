@@ -68,9 +68,11 @@ final class DatingNotificationService
         }
 
         foreach ($messagesByChannel as $channelId => $messages) {
-            $this->slackClient->postMessage(
+            $this->slackClient->postCustomMessage(
                 $channelId,
                 implode("\n", $messages),
+                'dating-bot-' . $today->format('Ymd'),
+                'https://4s.ambitious-i.net/icon/life118.png',
             );
         }
     }
