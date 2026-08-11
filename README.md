@@ -260,6 +260,37 @@ docker compose run --rm app composer test
 
 Dockerはローカル開発でのみ使用します。本番環境はDocker化せず、XServerのPHP 8.5.5を使用します。詳細は[本番実行環境](docs/production-environment.md)を参照してください。
 
+## 検証環境（`make check`）
+
+構文確認・コーディング規約の確認・マイグレーション適用・テストを、開発環境から分離された検証専用のCompose環境で一括実行できます。
+
+```shell
+make check
+```
+
+- `make check`は`compose.check.yaml`を検証専用のCompose project（`bvlionbatch5-check`）で実行します。開発用`compose.yaml`が使うcontainer・network・volume・host port（8080番）とは別のprojectであり、開発用の`database` volumeを共有しません。検証用DBは検証専用の使い捨てvolumeを使用します。
+- 検証用のappコンテナは実`.env`を読み込みません。`.env.example`の架空値だけを`/app/.env`へread-onlyで重ね、Composeの変数展開にも`--env-file .env.example`を使用します。
+- 成功・失敗にかかわらず、`make check`終了時に検証専用project（`bvlionbatch5-check`）のcontainer・network・volumeだけをcleanupします。開発中の`compose.yaml`側のcontainer・DBには一切影響しません。
+- GitHub Actions（`.github/workflows/ci.yaml`）も同じ`make check`を使用します。
+
+`make check`が異常終了してcleanupが行われなかった場合は、検証専用projectだけを対象に手動でcleanupできます。
+
+```shell
+make check-clean
+```
+
+## 開発用データベースの永続化と初期化
+
+`database` volumeにより、通常の`docker compose down`（`--volumes`を付けない停止）やコンテナの再作成では開発用DBデータは失われません。開発用DBのデータを完全に削除する場合だけ、明示的な破壊操作用コマンドを使用します。
+
+```shell
+make db-wipe CONFIRM=yes
+```
+
+`CONFIRM=yes`を指定しない場合はエラーで停止し、削除を実行しません。このコマンドは開発用の`database` volumeだけを対象とし、appコンテナや検証用Composeプロジェクト（`make check`）には触れません。削除後にDBを再作成する場合は、「データベースとマイグレーション」節の手順を再実行してください。
+
+起動中の開発用Docker環境（container・network・volume）の再作成・削除、開発用`database` volumeの削除、実`.env`・実データベース・Slack/IMAPなど実外部サービスへの接続は、利用者の明示的な許可なしに行いません。事故・中断・確認事項が発生した場合は、日本語で具体的に報告します。
+
 ## 本番デプロイ
 
 本番デプロイは手動で行います。GitHub Actionsは使用しません。理由は次のとおりです。

@@ -38,6 +38,15 @@
 - ユーザーの明示的な承認を得るまでPRをマージしません。
 - PRは、作業途中で共有する必要がある場合を除き、Draftにしません。
 
+## Docker運用の安全ルール
+
+- 起動中の既存ローカル開発Docker環境（container・network・volume）を、利用者の明示的な許可なしに再作成・削除しません。
+- 開発用の`database` volumeを、利用者の明示的な許可なしに削除しません。削除するコマンドは`make db-wipe CONFIRM=yes`だけです。
+- 実`.env`、実データベース、Slack・IMAPなど実外部サービスへ、利用者の明示的な許可なしに接続しません。
+- 上記について判断できない場合は、実行せず作業を止めて確認します。
+- 事故・中断・確認事項は日本語で具体的に報告します。
+- 通常の検証には検証専用の`make check`を使用します。`make check`は検証専用のCompose project（`bvlionbatch5-check`）だけを使い、開発用のcontainer・network・volume・host portには一切触れません。
+
 ## Public運用
 
 - 本番値、個人情報、秘密情報をリポジトリへ記録しません。
