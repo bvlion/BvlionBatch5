@@ -36,9 +36,11 @@ final class OvertimeNotificationService
         }
 
         try {
-            $timestamp = $this->slackClient->postMessage(
+            $timestamp = $this->slackClient->postCustomMessage(
                 $notificationConfiguration['channel_id'],
                 $notificationConfiguration['message'],
+                '麻衣 BOT',
+                'https://ca.slack-edge.com/T03CDHK90-U03CDM42W-b01e6bc14282-512',
             );
         } catch (RuntimeException) {
             return [
