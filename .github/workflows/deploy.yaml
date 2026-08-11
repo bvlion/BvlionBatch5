@@ -1,0 +1,83 @@
+name: Production Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+# 同一本番環境(XServer)への同時デプロイを防ぐため、タグ名に関わらず固定の
+# concurrency groupを共有する。cancel-in-progress: falseとqueue: maxにより、
+# 実行中のデプロイを打ち切らず、後続のdeploy runをキューして1つずつ順次実行する。
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # actions/checkout後のHEADを、デプロイ対象commitとして明示的に確定する。
+      - name: Resolve target commit
+        id: resolve
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
+
+      # Secrets are passed to the remote shell only via stdin (never as SSH
+      # command-line arguments), so they never appear in the remote host's
+      # process list. See bin/deploy-remote.sh for the deploy steps it runs
+      # (checkout of the tagged commit, composer install, migration,
+      # public/.htaccess sync) — mirrors README's "更新デプロイ" procedure.
+      - name: Deploy to production
+        env:
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_COMPOSER_PATH: ${{ secrets.DEPLOY_COMPOSER_PATH }}
+          DEPLOY_PUBLIC_PATH: ${{ secrets.DEPLOY_PUBLIC_PATH }}
+          TAG_NAME: ${{ github.ref_name }}
+          EXPECTED_COMMIT: ${{ steps.resolve.outputs.commit }}
+        run: |
+          set -euo pipefail
+          {
+            printf 'DEPLOY_PATH=%q\n' "$DEPLOY_PATH"
+            printf 'DEPLOY_COMPOSER_PATH=%q\n' "$DEPLOY_COMPOSER_PATH"
+            printf 'DEPLOY_PUBLIC_PATH=%q\n' "$DEPLOY_PUBLIC_PATH"
+            printf 'TAG_NAME=%q\n' "$TAG_NAME"
+            printf 'EXPECTED_COMMIT=%q\n' "$EXPECTED_COMMIT"
+            cat bin/deploy-remote.sh
+          } | ssh \
+              -i "$HOME/.ssh/deploy_key" \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              -o StrictHostKeyChecking=yes \
+              -p "$DEPLOY_SSH_PORT" \
+              "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" \
+              bash -s
+
+      - name: Unauthenticated connectivity check
+        env:
+          DEPLOY_BASE_URL: ${{ secrets.DEPLOY_BASE_URL }}
+        run: bin/check-deploy-connectivity.sh
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/deploy_key"
