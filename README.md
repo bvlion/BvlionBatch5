@@ -217,6 +217,7 @@ docker compose run --rm --no-deps app php bin/check-imap.php
 PDF化・PDF投稿の詳細は次のとおりです。
 
 - Dompdfはリモート画像・外部CSS・Webフォントの取得を無効化(`isRemoteEnabled = false`)し、JavaScriptも実行しません(`isJavascriptEnabled = false`)。メール本文の外部URLへBvlionBatch5側からアクセスすることはありません。
+- 日本語本文を表示するため、`resources/fonts/IPAexGothic`に同梱したIPAexゴシック(TrueType、IPAフォントライセンスv1.0)をDompdfへ登録し、メール本文のHTML/CSSがどのような`font-family`を指定していても、全要素へこのフォントを強制適用します(Dompdfはブラウザと異なり、指定フォントにグリフがない場合の自動フォールバックを行わないため)。XServerにインストール済みのフォントには依存しません。CFFアウトラインを持つOpenType(`.otf`)フォントはDompdfでの埋め込みが不安定なため使用せず、TrueType(`.ttf`)フォントのみを同梱しています。
 - HTML本文・生成したPDFはメモリ上でのみ扱い、ディスクへの一時ファイル書き出しやログ出力、永続保存を行いません。
 - Slackへのアップロードは、廃止済みの`files.upload`ではなく、次の3工程で行います。
   1. `files.getUploadURLExternal`でアップロードURLとfile IDを取得します。
