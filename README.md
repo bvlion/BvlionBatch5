@@ -71,16 +71,17 @@ BvlionBatch5専用のSlack App・Botを1つだけ使用します。mail・dating
 本番Slack Appは、次の手順で設定します。
 
 1. Slack Appの「Basic Information」で、Botの表示名とアイコンを設定します。
-2. 「OAuth & Permissions」のBot Token Scopesへ`chat:write`と`chat:write.customize`を追加します。`chat:write.public`は追加しません(投稿先チャンネルへは、後述のとおりBotを明示的に招待して参加させるため不要です)。
-3. Slack Appを対象のワークスペースへインストール、またはScope変更後は再インストールします。Bot Token ScopeはSlack Appの認可情報に紐づくため、`chat:write.customize`をSlack App設定へ追加しただけでは既存のBot Tokenへ反映されません。「OAuth & Permissions」画面で再インストール(reinstall)を実行してScopeを反映させてください。再インストールしても既存のBot Tokenが必ず新しい値に変わるとは限らないため、実行後に「OAuth & Permissions」画面で現在のBot Tokenを確認し、本番環境の`SLACK_BOT_TOKEN`と一致しているか確認してください(一致していない場合のみ差し替えます)。
+2. 「OAuth & Permissions」のBot Token Scopesへ`chat:write`・`chat:write.customize`・`files:write`を追加します。`chat:write.public`は追加しません(投稿先チャンネルへは、後述のとおりBotを明示的に招待して参加させるため不要です)。`files:write`は、HTML本文を持つメールをPDF化してSlackへ添付するために使用します(詳細は[メール処理API](#メール処理api)を参照)。
+3. Slack Appを対象のワークスペースへインストール、またはScope変更後は再インストールします。Bot Token ScopeはSlack Appの認可情報に紐づくため、`chat:write.customize`や`files:write`をSlack App設定へ追加しただけでは既存のBot Tokenへ反映されません。「OAuth & Permissions」画面で再インストール(reinstall)を実行してScopeを反映させてください。再インストールしても既存のBot Tokenが必ず新しい値に変わるとは限らないため、実行後に「OAuth & Permissions」画面で現在のBot Tokenを確認し、本番環境の`SLACK_BOT_TOKEN`と一致しているか確認してください(一致していない場合のみ差し替えます)。
 4. 通知先とする各チャンネルへSlack Appを招待し、参加させます(`chat:write.public`を使わないため、Botが参加していないチャンネルへは投稿できません)。
 5. Bot Tokenを本番環境の`SLACK_BOT_TOKEN`へ設定します。
 6. 通知先はチャンネルIDで管理し、実際のチャンネル名、チャンネルID、Bot Tokenをリポジトリや共有ログへ記録しません。
 
-投稿にはSlack Web APIの[`chat.postMessage`](https://docs.slack.dev/reference/methods/chat.postMessage)を使用します。
+通常投稿にはSlack Web APIの[`chat.postMessage`](https://docs.slack.dev/reference/methods/chat.postMessage)を、HTMLメールのPDF投稿には[`files.getUploadURLExternal`](https://docs.slack.dev/reference/methods/files.getUploadURLExternal)・[`files.completeUploadExternal`](https://docs.slack.dev/reference/methods/files.completeUploadExternal)を使用します。
 
 - dating・overtimeは、`channel`と`text`だけを指定する通常投稿です。表示名・アイコンはリクエストで上書きせず、Botそのものの表示名・アイコンで投稿されます。
-- mailは、`channel`・`text`に加えて`username`・`icon_url`を指定するカスタム投稿です。旧BvlionBatch4のメール転送元表示(送信元ごとの表示名・アイコン)を復元するため、`chat:write.customize`スコープを使ってメールルールごとに投稿の表示名とアイコンを上書きします。このカスタム表示は、家族内で利用する閉じたワークスペースにおけるメール転送元の識別が目的であり、人間へのなりすましを意図したものではありません。詳細は[メール処理API](#メール処理api)を参照してください。
+- mailのプレーンテキスト投稿は、`channel`・`text`に加えて`username`・`icon_url`を指定するカスタム投稿です。旧BvlionBatch4のメール転送元表示(送信元ごとの表示名・アイコン)を復元するため、`chat:write.customize`スコープを使ってメールルールごとに投稿の表示名とアイコンを上書きします。このカスタム表示は、家族内で利用する閉じたワークスペースにおけるメール転送元の識別が目的であり、人間へのなりすましを意図したものではありません。
+- mailのPDF投稿(HTML本文を持つメール)も、同じ`channel_id`・`username`・`icon_url`を`files.completeUploadExternal`へ指定し、プレーンテキスト投稿と同じ表示名・アイコンでファイルを共有します。詳細は[メール処理API](#メール処理api)を参照してください。
 
 ### Bot Token漏洩時のローテーション
 
@@ -184,11 +185,11 @@ docker compose run --rm --no-deps app php bin/check-imap.php
 
 成功時は`IMAP connectivity check succeeded.`だけを出力します。接続、検索、フォルダ参照に失敗した場合は、メールサーバー、アカウント、フォルダ、メールの実値を含めず、それぞれ異なるエラーで終了コード1を返します。この確認はメールの移動、削除、既読化を行いません。
 
-メール件名はMIMEエンコードと文字コードを処理してUTF-8へ変換します。本文はmultipartを再帰的に探索し、quoted-printableまたはbase64をデコードした`text/plain`を優先して取得します。ファイル名または添付指定があるパートは本文として扱いません。HTMLしかないメールは本文を空文字とし、取得する本文はSlack投稿で推奨される長さに合わせて先頭4,000文字へ制限します。
+メール件名はMIMEエンコードと文字コードを処理してUTF-8へ変換します。本文はmultipartを再帰的に探索し、quoted-printableまたはbase64をデコードした`text/plain`を優先して取得します。ファイル名または添付指定があるパートは本文として扱いません。`text/plain`本文はSlack投稿で推奨される長さに合わせて先頭4,000文字へ制限します。同様にmultipartを再帰的に探索し、添付ではない`text/html`本文もContent-Transfer-Encodingとcharsetを処理してUTF-8へ取得します(こちらは後述のPDF化に使うため文字数を制限しません)。`text/plain`のみのメールはHTML本文が空文字列になり、`text/html`のみのメールは本文(`text/plain`)が空文字列になります。
 
 ## メール処理履歴
 
-メール処理履歴は、個人情報を含まないメールボックス識別子、UIDVALIDITY、UIDの組み合わせで一意に管理します。Slack投稿済みと処理完了を別に記録し、Slack投稿後にメール移動だけ失敗した場合は、保存済みのSlackのtimestampを使って再投稿せず移動だけを再試行できる状態にします。件名、本文、送信者、メールアドレスは保存しません。
+メール処理履歴は、個人情報を含まないメールボックス識別子、UIDVALIDITY、UIDの組み合わせで一意に管理します。Slack投稿済みと処理完了を別に記録し、Slack投稿後にメール移動だけ失敗した場合は、保存済みの識別子を使って再投稿せず移動だけを再試行できる状態にします。この識別子は、プレーンテキストメールの通常投稿では`chat.postMessage`が返すメッセージtimestampですが、HTMLメールのPDF投稿では`files.completeUploadExternal`のレスポンスにメッセージtimestampが含まれないため、代わりに同レスポンスが返すSlackのfile ID(`files[0].id`)を保存します。どちらの場合も、値の意味に関わらず「このメールはSlackへ投稿済みである」ことを示す識別子としてのみ扱い、既存のカラム・再試行ロジックをそのまま利用します。件名、本文、送信者、メールアドレスは保存しません。
 
 完了済み履歴は完了から90日を過ぎたものだけを削除対象とします。Slack投稿済み・移動未完了の履歴は、二重投稿防止のため完了するまで自動削除しません。
 
@@ -206,7 +207,29 @@ docker compose run --rm --no-deps app php bin/check-imap.php
 | `prefix_format` | `user_name`の末尾へ付加する受信日時の書式。空文字列の場合は付加しない |
 | `enable_flag` | ルールの有効状態 |
 
-`POST /api/mail/process`は、有効なルールを登録順に処理します。対象メールの件名と`text/plain`本文を整形し、旧BvlionBatch4のメール転送元表示を復元した`username`・`icon_url`とともにSlackへ投稿します。投稿成功後に既読化して指定フォルダへ移動し、INBOXから削除します。Slack投稿に失敗したメールは移動しません。Slack投稿後の移動に失敗した場合は、処理履歴に基づいて次回の実行時にSlackへ再投稿せず、既読化と移動だけを再試行します。
+`POST /api/mail/process`は、有効なルールを登録順に処理します。対象メールの件名と本文を整形し、旧BvlionBatch4のメール転送元表示を復元した`username`・`icon_url`とともにSlackへ投稿します。投稿成功後に既読化して指定フォルダへ移動し、INBOXから削除します。Slack投稿に失敗したメールは移動しません。Slack投稿後の移動に失敗した場合は、処理履歴に基づいて次回の実行時にSlackへ再投稿せず、既読化と移動だけを再試行します。
+
+メールがHTML本文を持つかどうかで投稿方法を分けます。
+
+- HTML本文を持たないプレーンテキストのみのメールは、従来どおり件名と`text/plain`本文を整形したテキストを`chat.postMessage`で通常投稿します。
+- HTML本文を持つメール(プレーンテキストと両方を持つ場合を含む)は、HTML本文を`BvlionBatch5\Mail\HtmlToPdfConverter`(Dompdf)でPDF化し、件名を紹介文とするファイルとしてSlackへ添付します。プレーンテキスト本文はこのケースでは投稿に使用しません。
+
+PDF化・PDF投稿の詳細は次のとおりです。
+
+- Dompdfはリモート画像・外部CSS・Webフォントの取得を無効化(`isRemoteEnabled = false`)し、JavaScriptも実行しません(`isJavascriptEnabled = false`)。メール本文の外部URLへBvlionBatch5側からアクセスすることはありません。
+- 日本語本文を表示するため、`resources/fonts/IPAexGothic`に同梱したIPAexゴシック(TrueType、IPAフォントライセンスv1.0)をDompdfへ登録します。XServerにインストール済みのフォントには依存しません。CFFアウトラインを持つOpenType(`.otf`)フォントはDompdfでの埋め込みが不安定なため使用せず、TrueType(`.ttf`)フォントのみを同梱しています。
+- Dompdfはブラウザと異なり、指定フォントにグリフがない場合の自動フォールバックを行わないため、メール本文のHTML/CSSがどのような`font-family`を指定していても(`!important`や高い詳細度を伴う場合を含む)、必ずIPAexゴシックが選択されるようにしています。CSSへ上書きルールを注入して詳細度・`!important`で競う方式ではなく、Dompdf自身が解決しうる全フォント名(`sans-serif`・`serif`・`helvetica`・`times`等、`vendor/dompdf/dompdf/lib/fonts/installed-fonts.dist.json`が持つ既定の全ファミリー名)をIPAexゴシックへ登録し直すことで、メール側がどの名前を指定してもDompdfの解決結果がIPAexゴシック以外になり得ないようにしています。それ以外の未知のフォント名は、Dompdfの既定フォールバック(`Options::setDefaultFont()`、これもIPAexゴシックに設定)へ渡ります。
+- HTML本文・生成したPDFはメモリ上でのみ扱い、ディスクへの一時ファイル書き出しやログ出力、永続保存を行いません。
+- HTML本文の取得段階(`BvlionBatch5\Mail\MimeMessageDecoder`)とDompdfへ渡す直前(`BvlionBatch5\Mail\HtmlToPdfConverter::MAX_HTML_BYTES`、5,000,000バイト、約4.8MiB)の両方でサイズを制限します。Dompdfは入力HTMLサイズによって数倍〜十数倍のメモリを使用することがあり、実行環境のPHP `memory_limit`も未確認のため、5,000,000バイトという値はDompdfのレンダリングが安全であることを保証するものではなく、メモリ枯渇や実行時間超過のリスクを抑えるための運用上の上限です。
+  - `MimeMessageDecoder`は、HTMLパートを`imap_fetchbody()`で取得する前にIMAPが宣言するパートサイズ(`part->bytes`、RFC 3501でtext系パートに必須の項目)を確認し、超過時は本文取得自体を行わずに失敗させます。取得後も、base64/quoted-printableのデコード前後、UTF-8への文字コード変換後の各段階でバイト数を確認します。転送エンコード状態(base64・quoted-printableでかさ増しされた状態)の上限は、base64の4/3倍やquoted-printableの再現しにくい増加を考慮し、最終的なUTF-8 HTMLの上限(5,000,000バイト)より大きい値(4倍)を用い、デコード後・変換後は最終上限(5,000,000バイト)で確認します。宣言サイズが取得できない場合は、無制限扱いにはせず失敗させます。
+  - いずれの段階で上限を超えた場合も、HTMLを途中で切って不完全なPDFを生成することはせず、そのメール1件だけを本文・秘密情報を含まない`RuntimeException`で失敗させ、既読化・移動・完了記録を行わずに後続の対象メール処理を継続します。
+- IPAexゴシックの登録は、`FontMetrics::registerFont()`(呼び出しごとにフォント本体をディスクへ書き出す)を1回だけ行い、上記の全フォント名(14ファミリー×normal/bold/italic/bold-italicの4書体=56通り)は、その1回で生成された同じキャッシュ済みフォント・メトリクスを参照する別名として`FontMetrics::setFontFamily()`(`installed-fonts.json`という小さなJSONの参照情報だけを保存し、フォント本体やメトリクスファイルは複製しない)へ設定します。`registerFont()`をフォント名の数だけ呼ぶと、内容が同一でも呼び出しごとに新しいコピーがディスクへ書き出されるため、この方式でIPAexゴシック本体(約6MB)の重複コピーを防いでいます。
+- Slackへのアップロードは、廃止済みの`files.upload`ではなく、次の3工程で行います。
+  1. `files.getUploadURLExternal`でアップロードURLとfile IDを取得します。
+  2. 取得したURLへPDFバイナリを`POST`します(この工程はSlack Bot Tokenを使用しません)。
+  3. `files.completeUploadExternal`で対象チャンネルへ共有します。`channel_id`・`initial_comment`(件名を紹介する投稿本文)に加え、プレーンテキスト投稿と同じ`username`・`icon_url`を指定し、`chat:write.customize`スコープで表示名・アイコンを上書きします。
+- アップロードするファイル名は固定値(`mail.pdf`)とし、IMAP UID・メールアドレスなど個人情報につながる値を含めません。
+- 3工程のいずれかが失敗した場合はメール全体をSlack投稿失敗として扱い、既読化・移動・処理履歴の更新を行いません(`failure_count`に加算)。
 
 `channel_id`が`NULL`のルールに一致したメールは、Slack投稿(および表示名・アイコンの生成)を行わずに既読化・フォルダ移動・処理完了記録だけを行います。
 

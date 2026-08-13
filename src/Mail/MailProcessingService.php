@@ -10,12 +10,15 @@ use RuntimeException;
 
 final class MailProcessingService
 {
+    private const PDF_FILENAME = 'mail.pdf';
+
     private LegacyDateFormatConverter $dateFormatConverter;
 
     public function __construct(
         private MailRuleRepository $mailRuleRepository,
         private ImapMailbox $mailbox,
         private MimeMessageDecoder $mimeMessageDecoder,
+        private HtmlToPdfConverter $htmlToPdfConverter,
         private MailProcessingHistoryRepository $historyRepository,
         private SlackClient $slackClient,
         private string $mailboxIdentifier,
@@ -147,6 +150,19 @@ final class MailProcessingService
             $rule['prefix_format'],
             $content['received_at'],
         );
+
+        if ($content['html_body'] !== '') {
+            $pdf = $this->htmlToPdfConverter->convert($content['html_body']);
+
+            return $this->slackClient->postPdfFile(
+                $rule['channel_id'],
+                self::PDF_FILENAME,
+                $pdf,
+                sprintf('件名：%s', $content['subject']),
+                $displayName,
+                $rule['icon_url'],
+            );
+        }
 
         return $this->slackClient->postCustomMessage(
             $rule['channel_id'],

@@ -577,6 +577,87 @@ namespace BvlionBatch5\Tests {
             }
         }
 
+        public function testReadMessageIncludesHtmlBody(): void
+        {
+            $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
+            $GLOBALS['bvlion_batch5_next_imap_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_overview'] = [
+                (object) [
+                    'subject' => 'Example subject.',
+                    'udate' => 1739750942,
+                ],
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_structure'] = (object) [
+                'type' => TYPETEXT,
+                'subtype' => 'HTML',
+                'encoding' => ENC7BIT,
+                'bytes' => 100,
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_body']
+                = '<p>Example HTML body.</p>';
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+            $mailbox->connect(false, false);
+
+            try {
+                $result = $mailbox->readMessage(
+                    101,
+                    new MimeMessageDecoder(),
+                );
+
+                self::assertSame('', $result['body']);
+                self::assertSame(
+                    '<p>Example HTML body.</p>',
+                    $result['html_body'],
+                );
+            } finally {
+                $mailbox->disconnect();
+            }
+        }
+
+        public function testReadMessagePlainOnlyReturnsEmptyHtmlBody(): void
+        {
+            $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
+            $GLOBALS['bvlion_batch5_next_imap_errors'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_alerts'] = false;
+            $GLOBALS['bvlion_batch5_next_imap_overview'] = [
+                (object) [
+                    'subject' => 'Example subject.',
+                    'udate' => 1739750942,
+                ],
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_structure'] = (object) [
+                'type' => TYPETEXT,
+                'subtype' => 'PLAIN',
+                'encoding' => ENC7BIT,
+            ];
+            $GLOBALS['bvlion_batch5_next_imap_body'] = 'Example body.';
+            $mailbox = new ImapMailbox(
+                'imap.example.test',
+                993,
+                'user@example.test',
+                'example-password',
+            );
+            $mailbox->connect(false, false);
+
+            try {
+                $result = $mailbox->readMessage(
+                    101,
+                    new MimeMessageDecoder(),
+                );
+
+                self::assertSame('Example body.', $result['body']);
+                self::assertSame('', $result['html_body']);
+            } finally {
+                $mailbox->disconnect();
+            }
+        }
+
         public function testReadMessageReturnsNullReceivedAtWhenUdateMissing(): void
         {
             $GLOBALS['bvlion_batch5_next_imap_connection'] = (object) [];
