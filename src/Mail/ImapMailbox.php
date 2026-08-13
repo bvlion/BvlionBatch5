@@ -220,6 +220,7 @@ class ImapMailbox
      * @return array{
      *     subject: string,
      *     body: string,
+     *     html_body: string,
      *     received_at: DateTimeImmutable|null
      * }
      */
@@ -253,18 +254,21 @@ class ImapMailbox
             throw new RuntimeException('IMAP message read failed.');
         }
 
+        $bodyFetcher = fn (string $section): string|false => @imap_fetchbody(
+            $this->connection,
+            $uid,
+            $section,
+            FT_UID | FT_PEEK,
+        );
+
         return [
             'subject' => $decoder->decodeSubject(
                 (string) ($overview[0]->subject ?? ''),
             ),
-            'body' => $decoder->decodeBody(
+            'body' => $decoder->decodeBody($structure, $bodyFetcher),
+            'html_body' => $decoder->decodeHtmlBody(
                 $structure,
-                fn (string $section): string|false => @imap_fetchbody(
-                    $this->connection,
-                    $uid,
-                    $section,
-                    FT_UID | FT_PEEK,
-                ),
+                $bodyFetcher,
             ),
             'received_at' => $this->extractReceivedAt($overview[0]),
         ];

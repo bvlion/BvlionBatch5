@@ -254,4 +254,167 @@ final class MimeMessageDecoderTest extends TestCase
         self::assertSame(4000, mb_strlen($body, 'UTF-8'));
         self::assertSame(str_repeat('あ', 4000), $body);
     }
+
+    public function testDecodesQuotedPrintableHtmlBody(): void
+    {
+        $sourceBody = mb_convert_encoding(
+            '<p>Example café body.</p>',
+            'ISO-8859-1',
+            'UTF-8',
+        );
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'HTML',
+            'encoding' => ENCQUOTEDPRINTABLE,
+            'parameters' => [
+                (object) [
+                    'attribute' => 'charset',
+                    'value' => 'ISO-8859-1',
+                ],
+            ],
+        ];
+
+        $body = (new MimeMessageDecoder())->decodeHtmlBody(
+            $structure,
+            static function (string $partNumber) use ($sourceBody): string {
+                self::assertSame('1', $partNumber);
+
+                return quoted_printable_encode($sourceBody);
+            },
+        );
+
+        self::assertSame('<p>Example café body.</p>', $body);
+    }
+
+    public function testRecursivelyFindsHtmlBodyInMultipartAlternative(): void
+    {
+        $structure = (object) [
+            'type' => TYPEMULTIPART,
+            'subtype' => 'MIXED',
+            'parts' => [
+                (object) [
+                    'type' => TYPEMULTIPART,
+                    'subtype' => 'ALTERNATIVE',
+                    'parts' => [
+                        (object) [
+                            'type' => TYPETEXT,
+                            'subtype' => 'PLAIN',
+                            'encoding' => ENCBASE64,
+                            'parameters' => [
+                                (object) [
+                                    'attribute' => 'charset',
+                                    'value' => 'UTF-8',
+                                ],
+                            ],
+                        ],
+                        (object) [
+                            'type' => TYPETEXT,
+                            'subtype' => 'HTML',
+                            'encoding' => ENCQUOTEDPRINTABLE,
+                        ],
+                    ],
+                ],
+            ],
+        ];
+        $partBodies = [
+            '1.1' => base64_encode('Example plain body.'),
+            '1.2' => '<p>Example HTML body.</p>',
+        ];
+        $fetchedPartNumbers = [];
+
+        $body = (new MimeMessageDecoder())->decodeHtmlBody(
+            $structure,
+            static function (string $partNumber) use (
+                &$fetchedPartNumbers,
+                $partBodies,
+            ): string {
+                self::assertArrayHasKey($partNumber, $partBodies);
+                $fetchedPartNumbers[] = $partNumber;
+
+                return $partBodies[$partNumber];
+            },
+        );
+
+        self::assertSame('<p>Example HTML body.</p>', $body);
+        self::assertSame(['1.2'], $fetchedPartNumbers);
+    }
+
+    public function testPlainOnlyReturnsEmptyHtmlBody(): void
+    {
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'PLAIN',
+            'encoding' => ENC7BIT,
+        ];
+        $bodyFetcher = static function (string $partNumber): string {
+            self::fail('Plain text body must not be fetched.');
+        };
+
+        self::assertSame(
+            '',
+            (new MimeMessageDecoder())->decodeHtmlBody(
+                $structure,
+                $bodyFetcher,
+            ),
+        );
+    }
+
+    public function testHtmlAttachmentIsNotUsedAsBody(): void
+    {
+        $structure = (object) [
+            'type' => TYPEMULTIPART,
+            'subtype' => 'MIXED',
+            'parts' => [
+                (object) [
+                    'type' => TYPETEXT,
+                    'subtype' => 'HTML',
+                    'encoding' => ENCBASE64,
+                    'disposition' => 'ATTACHMENT',
+                    'dparameters' => [
+                        (object) [
+                            'attribute' => 'filename',
+                            'value' => 'example.html',
+                        ],
+                    ],
+                ],
+                (object) [
+                    'type' => TYPETEXT,
+                    'subtype' => 'HTML',
+                    'encoding' => ENC7BIT,
+                ],
+            ],
+        ];
+        $partBodies = [
+            '1' => base64_encode('<p>Example attachment content.</p>'),
+            '2' => '<p>Example message body.</p>',
+        ];
+
+        $body = (new MimeMessageDecoder())->decodeHtmlBody(
+            $structure,
+            static fn (string $partNumber): string|false =>
+                $partBodies[$partNumber] ?? false,
+        );
+
+        self::assertSame('<p>Example message body.</p>', $body);
+    }
+
+    public function testHtmlBodyIsNotLimitedToFourThousandCharacters(): void
+    {
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'HTML',
+            'encoding' => ENC7BIT,
+        ];
+
+        $body = (new MimeMessageDecoder())->decodeHtmlBody(
+            $structure,
+            static fn (string $partNumber): string => str_repeat(
+                'あ',
+                5000,
+            ),
+        );
+
+        self::assertSame(5000, mb_strlen($body, 'UTF-8'));
+        self::assertSame(str_repeat('あ', 5000), $body);
+    }
 }

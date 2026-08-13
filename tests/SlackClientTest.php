@@ -243,4 +243,264 @@ final class SlackClientTest extends TestCase
             'https://example.test/icon.png',
         );
     }
+
+    public function testPostPdfFileUploadsInThreeStepsAndReturnsFileId(): void
+    {
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                json_encode(
+                    [
+                        'ok' => true,
+                        'upload_url' => 'https://files.slack.com/upload/v1/'
+                            . 'example-upload',
+                        'file_id' => 'F0000000001',
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+            new Response(200, [], 'OK - 8'),
+            new Response(
+                200,
+                [],
+                json_encode(
+                    [
+                        'ok' => true,
+                        'files' => [
+                            ['id' => 'F0000000001', 'title' => 'Example'],
+                        ],
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+        ]);
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create($mockHandler);
+        $handlerStack->push(Middleware::history($requestHistory));
+        $slackClient = new SlackClient(
+            new Client(['handler' => $handlerStack]),
+            'xoxb-example-bot-token',
+        );
+
+        $fileId = $slackClient->postPdfFile(
+            'C0000000000',
+            'mail.pdf',
+            'example-pdf',
+            '件名：Example subject.',
+            'Example Forwarder',
+            'https://example.test/icon.png',
+        );
+
+        self::assertSame('F0000000001', $fileId);
+        self::assertCount(3, $requestHistory);
+
+        $uploadUrlRequest = $requestHistory[0]['request'];
+        self::assertSame(
+            'https://slack.com/api/files.getUploadURLExternal',
+            (string) $uploadUrlRequest->getUri(),
+        );
+        self::assertSame(
+            'Bearer xoxb-example-bot-token',
+            $uploadUrlRequest->getHeaderLine('Authorization'),
+        );
+        self::assertStringContainsString(
+            'name="filename"',
+            (string) $uploadUrlRequest->getBody(),
+        );
+        self::assertStringContainsString(
+            'mail.pdf',
+            (string) $uploadUrlRequest->getBody(),
+        );
+        self::assertMatchesRegularExpression(
+            '/name="length"\r\n[^\r]*\r\n\r\n11\r\n/',
+            (string) $uploadUrlRequest->getBody(),
+        );
+
+        $uploadRequest = $requestHistory[1]['request'];
+        self::assertSame(
+            'https://files.slack.com/upload/v1/example-upload',
+            (string) $uploadRequest->getUri(),
+        );
+        self::assertSame(
+            '',
+            $uploadRequest->getHeaderLine('Authorization'),
+        );
+        self::assertSame(
+            'application/octet-stream',
+            $uploadRequest->getHeaderLine('Content-Type'),
+        );
+        self::assertSame(
+            'example-pdf',
+            (string) $uploadRequest->getBody(),
+        );
+
+        $completeUploadRequest = $requestHistory[2]['request'];
+        self::assertSame(
+            'https://slack.com/api/files.completeUploadExternal',
+            (string) $completeUploadRequest->getUri(),
+        );
+        self::assertSame(
+            'Bearer xoxb-example-bot-token',
+            $completeUploadRequest->getHeaderLine('Authorization'),
+        );
+        $completeUploadBody = (string) $completeUploadRequest->getBody();
+        self::assertStringContainsString(
+            '[{"id":"F0000000001","title":"mail.pdf"}]',
+            $completeUploadBody,
+        );
+        self::assertStringContainsString('C0000000000', $completeUploadBody);
+        self::assertStringContainsString(
+            '件名：Example subject.',
+            $completeUploadBody,
+        );
+        self::assertStringContainsString(
+            'Example Forwarder',
+            $completeUploadBody,
+        );
+        self::assertStringContainsString(
+            'https://example.test/icon.png',
+            $completeUploadBody,
+        );
+    }
+
+    public function testPostPdfFileUploadStepHttpErrorIsHandled(): void
+    {
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                json_encode(
+                    [
+                        'ok' => true,
+                        'upload_url' => 'https://files.slack.com/upload/v1/'
+                            . 'example-upload',
+                        'file_id' => 'F0000000001',
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+            new Response(500, [], 'Internal Server Error'),
+        ]);
+        $slackClient = new SlackClient(
+            new Client(['handler' => $mockHandler]),
+            'xoxb-example-bot-token',
+        );
+
+        try {
+            $slackClient->postPdfFile(
+                'C0000000000',
+                'mail.pdf',
+                'example-pdf',
+                '件名：Example subject.',
+                'Example Forwarder',
+                'https://example.test/icon.png',
+            );
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Slack file upload failed.',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString(
+                'xoxb-example-bot-token',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString(
+                'C0000000000',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString(
+                'F0000000001',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    public function testPostPdfFileCompleteUploadStepSlackApiErrorIsHandled(): void
+    {
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                json_encode(
+                    [
+                        'ok' => true,
+                        'upload_url' => 'https://files.slack.com/upload/v1/'
+                            . 'example-upload',
+                        'file_id' => 'F0000000001',
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+            new Response(200, [], 'OK - 8'),
+            new Response(
+                200,
+                [],
+                json_encode(
+                    [
+                        'ok' => false,
+                        'error' => 'channel_not_found',
+                    ],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+        ]);
+        $slackClient = new SlackClient(
+            new Client(['handler' => $mockHandler]),
+            'xoxb-example-bot-token',
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Slack API request failed.');
+
+        $slackClient->postPdfFile(
+            'C0000000000',
+            'mail.pdf',
+            'example-pdf',
+            '件名：Example subject.',
+            'Example Forwarder',
+            'https://example.test/icon.png',
+        );
+    }
+
+    public function testPostPdfFileRequestUploadUrlFailureDoesNotUpload(): void
+    {
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                json_encode(
+                    ['ok' => false, 'error' => 'invalid_auth'],
+                    JSON_THROW_ON_ERROR,
+                ),
+            ),
+        ]);
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create($mockHandler);
+        $handlerStack->push(Middleware::history($requestHistory));
+        $slackClient = new SlackClient(
+            new Client(['handler' => $handlerStack]),
+            'xoxb-example-bot-token',
+        );
+
+        try {
+            $slackClient->postPdfFile(
+                'C0000000000',
+                'mail.pdf',
+                'example-pdf',
+                '件名：Example subject.',
+                'Example Forwarder',
+                'https://example.test/icon.png',
+            );
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Slack API request failed.',
+                $exception->getMessage(),
+            );
+        }
+
+        self::assertCount(1, $requestHistory);
+    }
 }

@@ -58,10 +58,11 @@ final class MimeMessageDecoder
         stdClass $structure,
         callable $bodyFetcher,
     ): string {
-        $body = $this->findPlainTextBody(
+        $body = $this->findBodyBySubtype(
             $structure,
             (int) ($structure->type ?? -1) === TYPEMULTIPART ? '' : '1',
             $bodyFetcher,
+            'PLAIN',
         );
 
         if ($body === null) {
@@ -73,11 +74,28 @@ final class MimeMessageDecoder
 
     /**
      * @param callable(string): (string|false) $bodyFetcher
+     *        IMAPのsection番号（例: 1、1.2）を受け取ります。
      */
-    private function findPlainTextBody(
+    public function decodeHtmlBody(
+        stdClass $structure,
+        callable $bodyFetcher,
+    ): string {
+        return $this->findBodyBySubtype(
+            $structure,
+            (int) ($structure->type ?? -1) === TYPEMULTIPART ? '' : '1',
+            $bodyFetcher,
+            'HTML',
+        ) ?? '';
+    }
+
+    /**
+     * @param callable(string): (string|false) $bodyFetcher
+     */
+    private function findBodyBySubtype(
         stdClass $part,
         string $partNumber,
         callable $bodyFetcher,
+        string $subtype,
     ): ?string {
         $isAttachment = strtoupper(
             (string) ($part->disposition ?? ''),
@@ -124,10 +142,11 @@ final class MimeMessageDecoder
                 $childPartNumber = $partNumber === ''
                     ? (string) ($index + 1)
                     : $partNumber . '.' . ($index + 1);
-                $body = $this->findPlainTextBody(
+                $body = $this->findBodyBySubtype(
                     $childPart,
                     $childPartNumber,
                     $bodyFetcher,
+                    $subtype,
                 );
 
                 if ($body !== null) {
@@ -140,7 +159,7 @@ final class MimeMessageDecoder
 
         if (
             (int) ($part->type ?? -1) !== TYPETEXT
-            || strtoupper((string) ($part->subtype ?? '')) !== 'PLAIN'
+            || strtoupper((string) ($part->subtype ?? '')) !== $subtype
         ) {
             return null;
         }

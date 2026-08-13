@@ -5,6 +5,7 @@ declare(strict_types=1);
 use BvlionBatch5\Database\ConnectionFactory;
 use BvlionBatch5\Dating\DatingNotificationService;
 use BvlionBatch5\Dating\DatingRepository;
+use BvlionBatch5\Mail\HtmlToPdfConverter;
 use BvlionBatch5\Mail\ImapMailbox;
 use BvlionBatch5\Mail\MailProcessingHistoryRepository;
 use BvlionBatch5\Mail\MailProcessingService;
@@ -75,6 +76,7 @@ $mailProcessingService = new MailProcessingService(
         $imapConfiguration['password'],
     ),
     new MimeMessageDecoder(),
+    new HtmlToPdfConverter(),
     new MailProcessingHistoryRepository($mailConnectionFactory),
     new SlackClient(
         new Client(),
