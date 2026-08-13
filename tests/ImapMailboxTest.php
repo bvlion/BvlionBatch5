@@ -592,6 +592,7 @@ namespace BvlionBatch5\Tests {
                 'type' => TYPETEXT,
                 'subtype' => 'HTML',
                 'encoding' => ENC7BIT,
+                'bytes' => 100,
             ];
             $GLOBALS['bvlion_batch5_next_imap_body']
                 = '<p>Example HTML body.</p>';

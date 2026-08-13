@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace BvlionBatch5\Tests;
 
+use BvlionBatch5\Mail\HtmlToPdfConverter;
 use BvlionBatch5\Mail\MimeMessageDecoder;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -266,6 +267,7 @@ final class MimeMessageDecoderTest extends TestCase
             'type' => TYPETEXT,
             'subtype' => 'HTML',
             'encoding' => ENCQUOTEDPRINTABLE,
+            'bytes' => 100,
             'parameters' => [
                 (object) [
                     'attribute' => 'charset',
@@ -311,6 +313,7 @@ final class MimeMessageDecoderTest extends TestCase
                             'type' => TYPETEXT,
                             'subtype' => 'HTML',
                             'encoding' => ENCQUOTEDPRINTABLE,
+                            'bytes' => 100,
                         ],
                     ],
                 ],
@@ -381,6 +384,7 @@ final class MimeMessageDecoderTest extends TestCase
                     'type' => TYPETEXT,
                     'subtype' => 'HTML',
                     'encoding' => ENC7BIT,
+                    'bytes' => 100,
                 ],
             ],
         ];
@@ -404,6 +408,7 @@ final class MimeMessageDecoderTest extends TestCase
             'type' => TYPETEXT,
             'subtype' => 'HTML',
             'encoding' => ENC7BIT,
+            'bytes' => 15000,
         ];
 
         $body = (new MimeMessageDecoder())->decodeHtmlBody(
@@ -416,5 +421,213 @@ final class MimeMessageDecoderTest extends TestCase
 
         self::assertSame(5000, mb_strlen($body, 'UTF-8'));
         self::assertSame(str_repeat('あ', 5000), $body);
+    }
+
+    public function testOversizedDeclaredBase64HtmlPartDoesNotCallBodyFetcher(): void
+    {
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'HTML',
+            'encoding' => ENCBASE64,
+            'bytes' => (HtmlToPdfConverter::MAX_HTML_BYTES * 4) + 1,
+        ];
+        $bodyFetcher = static function (string $partNumber): string {
+            self::fail(
+                'bodyFetcher must not be called for an oversized '
+                    . 'declared part size.',
+            );
+        };
+
+        try {
+            (new MimeMessageDecoder())->decodeHtmlBody(
+                $structure,
+                $bodyFetcher,
+            );
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Mail part exceeds the maximum allowed size before '
+                    . 'decoding.',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    public function testOversizedDeclaredQuotedPrintableHtmlPartDoesNotCallBodyFetcher(): void
+    {
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'HTML',
+            'encoding' => ENCQUOTEDPRINTABLE,
+            'bytes' => (HtmlToPdfConverter::MAX_HTML_BYTES * 4) + 1,
+        ];
+        $bodyFetcher = static function (string $partNumber): string {
+            self::fail(
+                'bodyFetcher must not be called for an oversized '
+                    . 'declared part size.',
+            );
+        };
+
+        try {
+            (new MimeMessageDecoder())->decodeHtmlBody(
+                $structure,
+                $bodyFetcher,
+            );
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Mail part exceeds the maximum allowed size before '
+                    . 'decoding.',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    /**
+     * Per RFC 3501, body-fld-octets (surfaced by PHP as $part->bytes)
+     * is a mandatory field for every text/* part, so a missing value
+     * indicates a non-compliant response rather than a legitimately
+     * size-less part. This must not be treated as "no known size,
+     * fetch anyway".
+     */
+    public function testMissingDeclaredSizeDoesNotCallBodyFetcher(): void
+    {
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'HTML',
+            'encoding' => ENC7BIT,
+        ];
+        $bodyFetcher = static function (string $partNumber): string {
+            self::fail(
+                'bodyFetcher must not be called when the declared '
+                    . 'size is missing.',
+            );
+        };
+
+        try {
+            (new MimeMessageDecoder())->decodeHtmlBody(
+                $structure,
+                $bodyFetcher,
+            );
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Mail part exceeds the maximum allowed size before '
+                    . 'decoding.',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    /**
+     * The IMAP-declared size understates the real fetched size here,
+     * so this specifically exercises the second checkpoint (the raw
+     * fetched body itself), independent of the first (the declared
+     * part->bytes checked before the fetch).
+     */
+    public function testFetchedBodyExceedingEncodedLimitFailsBeforeDecoding(): void
+    {
+        $oversizedRawBody = str_repeat(
+            'a',
+            (HtmlToPdfConverter::MAX_HTML_BYTES * 4) + 1,
+        );
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'HTML',
+            'encoding' => ENC7BIT,
+            'bytes' => 100,
+        ];
+
+        try {
+            (new MimeMessageDecoder())->decodeHtmlBody(
+                $structure,
+                static fn (string $partNumber): string => $oversizedRawBody,
+            );
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Mail part exceeds the maximum allowed size before '
+                    . 'decoding.',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    /**
+     * A base64 body whose encoded size fits comfortably within the
+     * transfer-encoded limit can still decode to something over the
+     * final UTF-8 limit; this must be rejected right after decoding,
+     * before charset conversion is even attempted, without exposing
+     * the mail's content in the exception.
+     */
+    public function testDecodedBodyExceedingFinalLimitFailsAfterDecoding(): void
+    {
+        $secretMarker = 'EXAMPLE-SECRET-HTML-CONTENT';
+        $oversizedDecodedBody = '<p>' . $secretMarker
+            . str_repeat('a', HtmlToPdfConverter::MAX_HTML_BYTES)
+            . '</p>';
+        $encodedBody = base64_encode($oversizedDecodedBody);
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'HTML',
+            'encoding' => ENCBASE64,
+            'bytes' => strlen($encodedBody),
+        ];
+
+        try {
+            (new MimeMessageDecoder())->decodeHtmlBody(
+                $structure,
+                static fn (string $partNumber): string => $encodedBody,
+            );
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Mail part exceeds the maximum allowed size after '
+                    . 'decoding.',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString(
+                $secretMarker,
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    /**
+     * Converting from a legacy charset to UTF-8 can grow the byte
+     * count (e.g. ISO-8859-1's non-ASCII bytes each become 2 UTF-8
+     * bytes), so a body that fits the final limit right after
+     * transfer-decoding can still exceed it once converted. This
+     * must be caught after conversion, not only after decoding.
+     */
+    public function testCharsetConversionExceedingFinalLimitFailsAfterConversion(): void
+    {
+        $rawIso88591Body = str_repeat("\xe9", 3_000_000);
+        $structure = (object) [
+            'type' => TYPETEXT,
+            'subtype' => 'HTML',
+            'encoding' => ENC7BIT,
+            'bytes' => strlen($rawIso88591Body),
+            'parameters' => [
+                (object) [
+                    'attribute' => 'charset',
+                    'value' => 'ISO-8859-1',
+                ],
+            ],
+        ];
+
+        try {
+            (new MimeMessageDecoder())->decodeHtmlBody(
+                $structure,
+                static fn (string $partNumber): string => $rawIso88591Body,
+            );
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'Mail part exceeds the maximum allowed size after '
+                    . 'decoding.',
+                $exception->getMessage(),
+            );
+        }
     }
 }

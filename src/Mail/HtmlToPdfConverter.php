@@ -36,19 +36,26 @@ final class HtmlToPdfConverter
     private const FONT_PATH = self::FONT_DIRECTORY . '/ipaexg.ttf';
 
     /**
-     * Dompdf is known to use several times (commonly cited as
-     * roughly 10-20x) the input HTML's size in memory while
-     * rendering, and this HTML (including any inline data URI
-     * images, which count toward this the same as any other byte)
-     * comes from an untrusted mail. Bounding it well below a
-     * conservative 128MB PHP memory_limit assumption -- rather than
-     * relying on whatever the actual XServer limit turns out to be
-     * -- avoids a single oversized mail exhausting memory or the
-     * request time limit for the whole batch. A mail over this limit
-     * is treated as a conversion failure for that mail only, not
-     * truncated and partially rendered.
+     * Dompdf is known to use a large multiple of the input HTML's
+     * size in memory while rendering, and this HTML (including any
+     * inline data URI images, which count toward this the same as
+     * any other byte) comes from an untrusted mail. Actual memory
+     * usage depends heavily on the HTML's structure and embedded
+     * images, and the true PHP memory_limit on XServer is not
+     * confirmed, so this is not a value that guarantees safety --
+     * it is an operational upper bound chosen to reduce the risk of
+     * a single oversized mail exhausting memory or the request time
+     * limit for the whole batch. A mail over this limit is treated
+     * as a conversion failure for that mail only, not truncated and
+     * partially rendered.
+     *
+     * MimeMessageDecoder enforces this same limit earlier, while
+     * extracting the HTML body from the mail, so that an oversized
+     * part is rejected before it is even fully fetched/decoded
+     * in memory. The check here is a last-resort backstop for
+     * whatever HTML this method is ever called with directly.
      */
-    private const MAX_HTML_BYTES = 5_000_000;
+    public const MAX_HTML_BYTES = 5_000_000;
 
     /**
      * Every font family name Dompdf itself ships in
