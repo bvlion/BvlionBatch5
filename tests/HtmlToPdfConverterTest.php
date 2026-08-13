@@ -67,9 +67,60 @@ final class HtmlToPdfConverterTest extends TestCase
             . '架空のメール本文です。</p></body></html>',
         );
 
+        self::assertJapaneseFontIsSelected($pdf);
+    }
+
+    /**
+     * A mail's own `!important` (or a highly specific selector) on
+     * font-family cannot be beaten by an injected CSS override rule
+     * of ours, since author-origin `!important` declarations are
+     * compared to each other by specificity/source order, not
+     * automatically beaten by another `!important` rule. This is why
+     * HtmlToPdfConverter does not try to win that cascade at all: it
+     * instead makes every font name Dompdf can resolve (see
+     * HtmlToPdfConverter::OVERRIDDEN_FONT_FAMILIES) resolve to the
+     * Japanese font, so whichever family name wins the cascade is
+     * irrelevant. These three cases mirror the ones raised in review.
+     */
+    public function testImportantInlineFontFamilyDoesNotOverrideJapaneseFont(): void
+    {
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+            . '<p style="font-family:Helvetica !important">'
+            . '架空のメール本文です。</p></body></html>',
+        );
+
+        self::assertJapaneseFontIsSelected($pdf);
+    }
+
+    public function testImportantIdSelectorFontFamilyDoesNotOverrideJapaneseFont(): void
+    {
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><head><style>#message{font-family:Arial !important;}'
+            . '</style></head><body><p id="message">'
+            . '架空のメール本文です。</p></body></html>',
+        );
+
+        self::assertJapaneseFontIsSelected($pdf);
+    }
+
+    public function testImportantInlineFontShorthandDoesNotOverrideJapaneseFont(): void
+    {
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+            . '<p style="font: bold 14px Helvetica !important">'
+            . '架空のメール本文です。</p></body></html>',
+        );
+
+        self::assertJapaneseFontIsSelected($pdf);
+    }
+
+    private static function assertJapaneseFontIsSelected(string $pdf): void
+    {
         self::assertStringContainsString('IPAexGothic', $pdf);
         self::assertStringNotContainsString('/BaseFont /Helvetica', $pdf);
         self::assertStringNotContainsString('/BaseFont /Arial', $pdf);
+        self::assertStringNotContainsString('/Subtype /CIDFontType0', $pdf);
     }
 
     public function testRemoteImageReferenceDoesNotFailConversion(): void

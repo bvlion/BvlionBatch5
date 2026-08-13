@@ -13,14 +13,14 @@ final class HtmlToPdfConverter
 {
     /**
      * Bundled under resources/fonts/IPAexGothic (IPA Font License
-     * Agreement v1.0, see the license file there). Registered
-     * explicitly and forced onto every element below, instead of
-     * relying on XServer's installed fonts or on Dompdf resolving a
-     * CJK-capable font from the mail's own font-family declarations:
-     * Dompdf, unlike a browser, does not fall back to a different
-     * font per glyph when the selected font is missing characters,
-     * so an unregistered or non-CJK font would silently render
-     * Japanese text as blank glyphs.
+     * Agreement v1.0, see the license file there), instead of
+     * relying on XServer's installed fonts. Registered under
+     * OVERRIDDEN_FONT_FAMILIES below so it is the only font Dompdf
+     * can ever select, regardless of what the mail's own font-family
+     * declares: Dompdf, unlike a browser, does not fall back to a
+     * different font per glyph when the selected font is missing
+     * characters, so letting an unregistered or non-CJK font win
+     * would silently render Japanese text as blank glyphs.
      *
      * TrueType (.ttf), not OpenType/CFF (.otf), is required here:
      * dompdf/php-font-lib's CID font embedding only reliably embeds
@@ -34,6 +34,38 @@ final class HtmlToPdfConverter
     private const FONT_DIRECTORY = __DIR__
         . '/../../resources/fonts/IPAexGothic';
     private const FONT_PATH = self::FONT_DIRECTORY . '/ipaexg.ttf';
+
+    /**
+     * Every font family name Dompdf itself ships in
+     * lib/fonts/installed-fonts.dist.json. A mail's own CSS cannot
+     * make Dompdf select a non-Japanese font by using `!important`
+     * or a more specific selector, because these are the only family
+     * names Dompdf's FontMetrics::getFont() can ever resolve to
+     * something other than Options::defaultFont() (itself set to
+     * FONT_FAMILY below) -- overriding all of them, in addition to
+     * FONT_FAMILY, removes every non-Japanese font Dompdf could
+     * possibly pick. Any other family name a mail requests simply
+     * fails to resolve and falls through to defaultFont(), per
+     * Css\Style::_get_font_family(). This is verified by
+     * HtmlToPdfConverterTest against Dompdf's actual source
+     * (vendor/dompdf/dompdf), not merely by observed behavior.
+     */
+    private const OVERRIDDEN_FONT_FAMILIES = [
+        self::FONT_FAMILY,
+        'sans-serif',
+        'serif',
+        'monospace',
+        'fixed',
+        'times',
+        'times-roman',
+        'courier',
+        'helvetica',
+        'symbol',
+        'zapfdingbats',
+        'dejavu sans',
+        'dejavu sans mono',
+        'dejavu serif',
+    ];
 
     public function convert(string $html): string
     {
@@ -52,7 +84,7 @@ final class HtmlToPdfConverter
 
         try {
             $this->registerJapaneseFont($dompdf);
-            $dompdf->loadHtml($this->forceJapaneseFont($html), 'UTF-8');
+            $dompdf->loadHtml($html, 'UTF-8');
             $dompdf->setPaper('A4', 'portrait');
             $dompdf->render();
             $pdf = $dompdf->output();
@@ -72,50 +104,36 @@ final class HtmlToPdfConverter
      * file is registered for bold/italic variants too: Dompdf will
      * render them without a true bold/italic outline, but the
      * Japanese text stays readable, which is this feature's only
-     * goal (see the FONT_FAMILY docblock).
+     * goal (see the FONT_FAMILY docblock). Registering it under
+     * every name in OVERRIDDEN_FONT_FAMILIES -- rather than fighting
+     * the mail's own CSS cascade with an injected override rule --
+     * is what actually guarantees the mail's own font-family cannot
+     * defeat this, including with `!important` or a highly specific
+     * selector: whichever family name Dompdf ends up resolving, it
+     * resolves to this file.
      */
     private function registerJapaneseFont(Dompdf $dompdf): void
     {
         $fontMetrics = $dompdf->getFontMetrics();
 
-        foreach (
-            [
-                ['weight' => 'normal', 'style' => 'normal'],
-                ['weight' => 'bold', 'style' => 'normal'],
-                ['weight' => 'normal', 'style' => 'italic'],
-                ['weight' => 'bold', 'style' => 'italic'],
-            ] as $variant
-        ) {
-            $fontMetrics->registerFont(
+        foreach (self::OVERRIDDEN_FONT_FAMILIES as $family) {
+            foreach (
                 [
-                    'family' => self::FONT_FAMILY,
-                    'weight' => $variant['weight'],
-                    'style' => $variant['style'],
-                ],
-                self::FONT_PATH,
-            );
+                    ['weight' => 'normal', 'style' => 'normal'],
+                    ['weight' => 'bold', 'style' => 'normal'],
+                    ['weight' => 'normal', 'style' => 'italic'],
+                    ['weight' => 'bold', 'style' => 'italic'],
+                ] as $variant
+            ) {
+                $fontMetrics->registerFont(
+                    [
+                        'family' => $family,
+                        'weight' => $variant['weight'],
+                        'style' => $variant['style'],
+                    ],
+                    self::FONT_PATH,
+                );
+            }
         }
-    }
-
-    /**
-     * Overrides every element's font-family with the registered
-     * Japanese font, regardless of what the mail's own HTML/CSS
-     * requests. This trades typographic fidelity with the original
-     * mail for guaranteed readability of the Japanese text, which is
-     * this feature's only goal (see the FONT_FAMILY docblock).
-     */
-    private function forceJapaneseFont(string $html): string
-    {
-        $style = sprintf(
-            '<style>*,*::before,*::after{font-family:"%s",sans-serif '
-                . '!important;}</style>',
-            self::FONT_FAMILY,
-        );
-
-        if (stripos($html, '</head>') !== false) {
-            return preg_replace('/<\/head>/i', $style . '</head>', $html, 1);
-        }
-
-        return $style . $html;
     }
 }
