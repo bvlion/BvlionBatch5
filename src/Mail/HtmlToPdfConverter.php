@@ -36,6 +36,21 @@ final class HtmlToPdfConverter
     private const FONT_PATH = self::FONT_DIRECTORY . '/ipaexg.ttf';
 
     /**
+     * Dompdf is known to use several times (commonly cited as
+     * roughly 10-20x) the input HTML's size in memory while
+     * rendering, and this HTML (including any inline data URI
+     * images, which count toward this the same as any other byte)
+     * comes from an untrusted mail. Bounding it well below a
+     * conservative 128MB PHP memory_limit assumption -- rather than
+     * relying on whatever the actual XServer limit turns out to be
+     * -- avoids a single oversized mail exhausting memory or the
+     * request time limit for the whole batch. A mail over this limit
+     * is treated as a conversion failure for that mail only, not
+     * truncated and partially rendered.
+     */
+    private const MAX_HTML_BYTES = 5_000_000;
+
+    /**
      * Every font family name Dompdf itself ships in
      * lib/fonts/installed-fonts.dist.json. A mail's own CSS cannot
      * make Dompdf select a non-Japanese font by using `!important`
@@ -69,6 +84,13 @@ final class HtmlToPdfConverter
 
     public function convert(string $html): string
     {
+        if (strlen($html) > self::MAX_HTML_BYTES) {
+            throw new RuntimeException(
+                'HTML body exceeds the maximum size allowed for PDF '
+                    . 'conversion.',
+            );
+        }
+
         $options = new Options();
         $options->setIsRemoteEnabled(false);
         $options->setIsJavascriptEnabled(false);
@@ -100,40 +122,57 @@ final class HtmlToPdfConverter
     }
 
     /**
-     * IPAex Gothic ships a single (regular) weight, so that same
-     * file is registered for bold/italic variants too: Dompdf will
-     * render them without a true bold/italic outline, but the
+     * IPAex Gothic ships a single (regular) weight, so the same
+     * physical font also stands in for bold/italic variants: Dompdf
+     * will render them without a true bold/italic outline, but the
      * Japanese text stays readable, which is this feature's only
-     * goal (see the FONT_FAMILY docblock). Registering it under
-     * every name in OVERRIDDEN_FONT_FAMILIES -- rather than fighting
-     * the mail's own CSS cascade with an injected override rule --
-     * is what actually guarantees the mail's own font-family cannot
-     * defeat this, including with `!important` or a highly specific
-     * selector: whichever family name Dompdf ends up resolving, it
-     * resolves to this file.
+     * goal (see the FONT_FAMILY docblock).
+     *
+     * FontMetrics::registerFont() writes a fresh copy of the font
+     * file (plus metrics) to disk for every distinct (family, style)
+     * pair it is called with, even when the source file is
+     * identical. Registering FONT_PATH once under FONT_FAMILY's
+     * normal style is therefore the only real registerFont() call;
+     * every other name/style combination in OVERRIDDEN_FONT_FAMILIES
+     * is set up as an alias pointing at that same registered path
+     * via setFontFamily(), which only updates FontMetrics' in-memory
+     * and cached lookup table, not the font file itself. Calling
+     * registerFont() once per name (14 families x 4 styles = 56
+     * calls) would instead duplicate the ~6MB font up to 56 times on
+     * first use.
      */
     private function registerJapaneseFont(Dompdf $dompdf): void
     {
         $fontMetrics = $dompdf->getFontMetrics();
 
+        $fontMetrics->registerFont(
+            [
+                'family' => self::FONT_FAMILY,
+                'weight' => 'normal',
+                'style' => 'normal',
+            ],
+            self::FONT_PATH,
+        );
+
+        $registeredFontPath = $fontMetrics->getFontFamilies()
+            [mb_strtolower(self::FONT_FAMILY, 'UTF-8')]['normal']
+            ?? null;
+
+        if (!is_string($registeredFontPath)) {
+            throw new RuntimeException(
+                'Japanese font registration failed.',
+            );
+        }
+
+        $aliasedStyles = [
+            'normal' => $registeredFontPath,
+            'bold' => $registeredFontPath,
+            'italic' => $registeredFontPath,
+            'bold_italic' => $registeredFontPath,
+        ];
+
         foreach (self::OVERRIDDEN_FONT_FAMILIES as $family) {
-            foreach (
-                [
-                    ['weight' => 'normal', 'style' => 'normal'],
-                    ['weight' => 'bold', 'style' => 'normal'],
-                    ['weight' => 'normal', 'style' => 'italic'],
-                    ['weight' => 'bold', 'style' => 'italic'],
-                ] as $variant
-            ) {
-                $fontMetrics->registerFont(
-                    [
-                        'family' => $family,
-                        'weight' => $variant['weight'],
-                        'style' => $variant['style'],
-                    ],
-                    self::FONT_PATH,
-                );
-            }
+            $fontMetrics->setFontFamily($family, $aliasedStyles);
         }
     }
 }

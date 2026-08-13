@@ -7,6 +7,7 @@ namespace BvlionBatch5\Tests;
 use BvlionBatch5\Mail\HtmlToPdfConverter;
 use FontLib\Font;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 final class HtmlToPdfConverterTest extends TestCase
 {
@@ -121,6 +122,56 @@ final class HtmlToPdfConverterTest extends TestCase
         self::assertStringNotContainsString('/BaseFont /Helvetica', $pdf);
         self::assertStringNotContainsString('/BaseFont /Arial', $pdf);
         self::assertStringNotContainsString('/Subtype /CIDFontType0', $pdf);
+    }
+
+    /**
+     * Dompdf is known to use a large multiple of the input HTML's
+     * size in memory while rendering; an oversized mail must fail
+     * that single mail rather than being truncated and partially
+     * rendered, or risking exhausting memory/time for the whole
+     * batch. See HtmlToPdfConverter::MAX_HTML_BYTES for the exact
+     * threshold and rationale.
+     */
+    public function testOversizedHtmlFailsWithoutExposingContent(): void
+    {
+        $secretMarker = 'EXAMPLE-SECRET-MAIL-CONTENT';
+        $oversizedHtml = '<html><body><p>' . $secretMarker
+            . str_repeat('a', 5_000_000) . '</p></body></html>';
+
+        try {
+            (new HtmlToPdfConverter())->convert($oversizedHtml);
+            self::fail('RuntimeException was not thrown.');
+        } catch (RuntimeException $exception) {
+            self::assertSame(
+                'HTML body exceeds the maximum size allowed for PDF '
+                    . 'conversion.',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString(
+                $secretMarker,
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    /**
+     * Inline data URIs are part of the same HTML string handed to
+     * Dompdf, so they must count toward the size limit like any
+     * other byte -- a mail cannot smuggle an oversized body past the
+     * check just by moving the bulk of it into a data URI.
+     */
+    public function testDataUriCountsTowardHtmlSizeLimit(): void
+    {
+        $oversizedHtml = '<html><body><img src="data:image/png;base64,'
+            . str_repeat('A', 5_000_000) . '"></body></html>';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage(
+            'HTML body exceeds the maximum size allowed for PDF '
+                . 'conversion.',
+        );
+
+        (new HtmlToPdfConverter())->convert($oversizedHtml);
     }
 
     public function testRemoteImageReferenceDoesNotFailConversion(): void

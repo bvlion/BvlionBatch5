@@ -1420,4 +1420,134 @@ final class MailProcessingServiceTest extends TestCase
         );
         self::assertCount(0, $requestHistory);
     }
+
+    /**
+     * An HTML body far larger than HtmlToPdfConverter::MAX_HTML_BYTES
+     * must fail only that mail (no read/move/completion, no Slack
+     * post attempt) and must not stop the batch: a later, normally
+     * sized mail is still processed. Uses the real
+     * HtmlToPdfConverter so the size check runs exactly as in
+     * production, rather than asserting the interaction with a mock.
+     */
+    public function testOversizedHtmlBodyFailsWithoutMovingAndContinuesProcessing(): void
+    {
+        $mailRuleRepository = $this->createStub(MailRuleRepository::class);
+        $mailRuleRepository->method('findEnabledRules')->willReturn([
+            [
+                'target_from' => 'example-sender',
+                'to_folder' => 'ExampleArchive',
+                'channel_id' => 'C0000000000',
+                'user_name' => 'Example Forwarder',
+                'icon_url' => 'https://example.test/icon.png',
+                'prefix_format' => '',
+            ],
+        ]);
+        $mailbox = $this->createMock(ImapMailbox::class);
+        $mailbox->expects(self::once())->method('connect');
+        $mailbox->method('getUidValidity')->willReturn(123456);
+        $mailbox->method('searchMessages')->willReturn([
+            [
+                'uid' => 101,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example oversized message.',
+            ],
+            [
+                'uid' => 102,
+                'sender' => 'example-sender@example.test',
+                'subject' => 'Example normal message.',
+            ],
+        ]);
+        $mailbox
+            ->expects(self::exactly(2))
+            ->method('readMessage')
+            ->willReturnCallback(
+                function (
+                    int $uid,
+                    MimeMessageDecoder $decoder,
+                ): array {
+                    if ($uid === 101) {
+                        return [
+                            'subject' => 'Example oversized subject.',
+                            'body' => '',
+                            'html_body' => '<html><body><p>'
+                                . str_repeat('a', 5_000_000)
+                                . '</p></body></html>',
+                            'received_at' => $this->exampleReceivedAt(),
+                        ];
+                    }
+
+                    self::assertSame(102, $uid);
+
+                    return [
+                        'subject' => 'Example normal subject.',
+                        'body' => 'Example normal body.',
+                        'html_body' => '',
+                        'received_at' => $this->exampleReceivedAt(),
+                    ];
+                },
+            );
+        $mailbox
+            ->expects(self::once())
+            ->method('markMessageAsSeen')
+            ->with(102);
+        $mailbox
+            ->expects(self::once())
+            ->method('moveMessage')
+            ->with(102, 'ExampleArchive');
+        $mailbox->expects(self::once())->method('disconnect');
+        $historyRepository = $this->createMock(
+            MailProcessingHistoryRepository::class,
+        );
+        $historyRepository
+            ->expects(self::exactly(2))
+            ->method('find')
+            ->willReturn(null);
+        $historyRepository
+            ->expects(self::once())
+            ->method('recordSlackPosted')
+            ->with(
+                'example-mailbox',
+                123456,
+                102,
+                '1234567890.123456',
+            );
+        $historyRepository
+            ->expects(self::once())
+            ->method('markCompleted')
+            ->with('example-mailbox', 123456, 102);
+        $requestHistory = [];
+        $mockHandler = new MockHandler([
+            new Response(
+                200,
+                [],
+                '{"ok":true,"ts":"1234567890.123456"}',
+            ),
+        ]);
+        $handlerStack = HandlerStack::create($mockHandler);
+        $handlerStack->push(Middleware::history($requestHistory));
+        $service = new MailProcessingService(
+            $mailRuleRepository,
+            $mailbox,
+            new MimeMessageDecoder(),
+            new HtmlToPdfConverter(),
+            $historyRepository,
+            new SlackClient(
+                new Client(['handler' => $handlerStack]),
+                'xoxb-example-bot-token',
+            ),
+            'example-mailbox',
+        );
+
+        self::assertSame(
+            ['success' => false, 'failure_count' => 1],
+            $service->process(),
+        );
+        // Only message 102's plain-text postCustomMessage() call: the
+        // oversized message 101 never reaches Slack at all.
+        self::assertCount(1, $requestHistory);
+        self::assertStringContainsString(
+            'Example normal subject.',
+            (string) $requestHistory[0]['request']->getBody(),
+        );
+    }
 }

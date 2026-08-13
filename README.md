@@ -220,6 +220,8 @@ PDF化・PDF投稿の詳細は次のとおりです。
 - 日本語本文を表示するため、`resources/fonts/IPAexGothic`に同梱したIPAexゴシック(TrueType、IPAフォントライセンスv1.0)をDompdfへ登録します。XServerにインストール済みのフォントには依存しません。CFFアウトラインを持つOpenType(`.otf`)フォントはDompdfでの埋め込みが不安定なため使用せず、TrueType(`.ttf`)フォントのみを同梱しています。
 - Dompdfはブラウザと異なり、指定フォントにグリフがない場合の自動フォールバックを行わないため、メール本文のHTML/CSSがどのような`font-family`を指定していても(`!important`や高い詳細度を伴う場合を含む)、必ずIPAexゴシックが選択されるようにしています。CSSへ上書きルールを注入して詳細度・`!important`で競う方式ではなく、Dompdf自身が解決しうる全フォント名(`sans-serif`・`serif`・`helvetica`・`times`等、`vendor/dompdf/dompdf/lib/fonts/installed-fonts.dist.json`が持つ既定の全ファミリー名)をIPAexゴシックへ登録し直すことで、メール側がどの名前を指定してもDompdfの解決結果がIPAexゴシック以外になり得ないようにしています。それ以外の未知のフォント名は、Dompdfの既定フォールバック(`Options::setDefaultFont()`、これもIPAexゴシックに設定)へ渡ります。
 - HTML本文・生成したPDFはメモリ上でのみ扱い、ディスクへの一時ファイル書き出しやログ出力、永続保存を行いません。
+- Dompdfへ渡す前に、HTML本文(data URI等を含むバイト数全体)を`BvlionBatch5\Mail\HtmlToPdfConverter::MAX_HTML_BYTES`(5,000,000バイト、約4.8MiB)で制限します。Dompdfは入力HTMLサイズの数倍〜十数倍のメモリを使用することが知られており、実行環境のPHP `memory_limit`が確認できていないため、控えめな128MBを仮定してもDompdfのレンダリング自体に安全な余裕を残せる値として設定しています。上限を超えるメールはHTMLを途中で切って不完全なPDFを生成することはせず、そのメール1件だけをSlack投稿失敗として扱い(秘密情報・本文を含まない`RuntimeException`)、既読化・移動・完了記録を行わずに後続の対象メール処理を継続します。
+- IPAexゴシックの登録は、`FontMetrics::registerFont()`を1回(フォント本体のディスクへの書き出しを伴う実処理)だけ行い、上記の全フォント名(14ファミリー×normal/bold/italic/bold-italicの4書体=56通り)は、その1回で生成された同じキャッシュ済みフォントを指す別名として`FontMetrics::setFontFamily()`(ファイルへの書き出しを伴わない)へ設定します。`registerFont()`をフォント名の数だけ呼ぶと、内容が同一でも呼び出しごとに新しいコピーがディスクへ書き出されるため、この方式でIPAexゴシック本体(約6MB)の重複コピーを防いでいます。
 - Slackへのアップロードは、廃止済みの`files.upload`ではなく、次の3工程で行います。
   1. `files.getUploadURLExternal`でアップロードURLとfile IDを取得します。
   2. 取得したURLへPDFバイナリを`POST`します(この工程はSlack Bot Tokenを使用しません)。
