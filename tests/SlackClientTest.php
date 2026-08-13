@@ -304,17 +304,18 @@ final class SlackClientTest extends TestCase
             'Bearer xoxb-example-bot-token',
             $uploadUrlRequest->getHeaderLine('Authorization'),
         );
-        self::assertStringContainsString(
-            'name="filename"',
-            (string) $uploadUrlRequest->getBody(),
-        );
-        self::assertStringContainsString(
-            'mail.pdf',
-            (string) $uploadUrlRequest->getBody(),
+        // Guzzleのmultipart出力は、Content-Dispositionと空行の間に
+        // バージョンによって任意のpart headerが0行または複数行入る
+        // （Guzzle 7は入ることがあるが、Guzzle 8では入らない）ため、
+        // その行数に依存しない正規表現でfilenameとlengthの値を検証する。
+        $uploadUrlBody = (string) $uploadUrlRequest->getBody();
+        self::assertMatchesRegularExpression(
+            '/name="filename"\r\n(?:[^\r\n]+\r\n)*\r\nmail\.pdf\r\n/',
+            $uploadUrlBody,
         );
         self::assertMatchesRegularExpression(
-            '/name="length"\r\n[^\r]*\r\n\r\n11\r\n/',
-            (string) $uploadUrlRequest->getBody(),
+            '/name="length"\r\n(?:[^\r\n]+\r\n)*\r\n11\r\n/',
+            $uploadUrlBody,
         );
 
         $uploadRequest = $requestHistory[1]['request'];
