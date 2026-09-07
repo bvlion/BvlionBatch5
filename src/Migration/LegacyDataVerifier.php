@@ -48,11 +48,6 @@ final class LegacyDataVerifier
      *         disabled_count_actual: int,
      *         expected_null_channel_id_count: int,
      *         actual_null_channel_id_count: int
-     *     }|null,
-     *     overtime: array{
-     *         expected_present: bool,
-     *         actual_present: bool,
-     *         matched: bool
      *     }|null
      * }
      */
@@ -75,7 +70,6 @@ final class LegacyDataVerifier
                 'errors' => $resolved['errors'],
                 'dating' => null,
                 'mail_api' => null,
-                'overtime' => null,
             ];
         }
 
@@ -132,18 +126,6 @@ final class LegacyDataVerifier
             static fn (array $row): bool => $row['enable_flag'] === 1,
         ));
 
-        $overtimeRow = $connection->query(
-            <<<'SQL'
-                SELECT message, channel_id
-                FROM overtime_notification_settings
-                WHERE id = 1
-                SQL,
-        )->fetch(PDO::FETCH_ASSOC);
-        $overtimeMatched = is_array($overtimeRow)
-            && $resolved['overtime'] !== null
-            && $this->hash($overtimeRow, ['message', 'channel_id'])
-                === $this->hash($resolved['overtime'], ['message', 'channel_id']);
-
         return [
             'valid' => true,
             'errors' => [],
@@ -164,11 +146,6 @@ final class LegacyDataVerifier
                 'actual_null_channel_id_count' => (int) $connection->query(
                     'SELECT COUNT(*) FROM mail_api WHERE channel_id IS NULL',
                 )->fetchColumn(),
-            ],
-            'overtime' => [
-                'expected_present' => $resolved['overtime'] !== null,
-                'actual_present' => is_array($overtimeRow),
-                'matched' => $overtimeMatched,
             ],
         ];
     }

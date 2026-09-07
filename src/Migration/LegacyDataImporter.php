@@ -16,7 +16,6 @@ final class LegacyDataImporter
         private int $expectedMailApiEnabledCount = 43,
         private int $expectedMailApiDisabledCount = 1,
         private int $expectedMailApiNullChannelCount = 31,
-        private int $expectedOvertimeCount = 1,
     ) {
     }
 
@@ -49,7 +48,6 @@ final class LegacyDataImporter
      *         enable_flag: int
      *     }>,
      *     mail_api_null_channel_count: int,
-     *     overtime: array{message: string, channel_id: string}|null,
      *     expected_counts: array<string, array{
      *         expected: int,
      *         actual: int,
@@ -66,11 +64,7 @@ final class LegacyDataImporter
         $errors = [];
         $usedChannelNames = [];
 
-        [
-            $datingChannelId,
-            $overtimeMessage,
-            $overtimeChannelId,
-        ] = $this->resolveSettings(
+        $datingChannelId = $this->resolveSettings(
             $settings,
             $channelMap,
             $usedChannelNames,
@@ -107,10 +101,6 @@ final class LegacyDataImporter
                 $unusedChannelCount === 1 ? 'y' : 'ies',
             );
         }
-
-        $overtime = $overtimeChannelId !== null && $overtimeMessage !== null
-            ? ['message' => $overtimeMessage, 'channel_id' => $overtimeChannelId]
-            : null;
 
         usort(
             $resolvedDating,
@@ -157,12 +147,6 @@ final class LegacyDataImporter
                 $this->expectedMailApiNullChannelCount,
                 $errors,
             ),
-            'overtime' => $this->countCheck(
-                'overtime settings count',
-                $overtime !== null ? 1 : 0,
-                $this->expectedOvertimeCount,
-                $errors,
-            ),
         ];
 
         return [
@@ -171,7 +155,6 @@ final class LegacyDataImporter
             'dating' => $resolvedDating,
             'mail_api' => $resolvedMailApi,
             'mail_api_null_channel_count' => $nullChannelCount,
-            'overtime' => $overtime,
             'expected_counts' => $expectedCounts,
         ];
     }
@@ -203,8 +186,7 @@ final class LegacyDataImporter
      *     can_execute: bool,
      *     abort_reason: string|null,
      *     dating_inserted: int,
-     *     mail_api_inserted: int,
-     *     overtime_inserted: int
+     *     mail_api_inserted: int
      * }
      */
     public function import(
@@ -234,7 +216,6 @@ final class LegacyDataImporter
             'abort_reason' => null,
             'dating_inserted' => 0,
             'mail_api_inserted' => 0,
-            'overtime_inserted' => 0,
         ];
 
         if (!$report['valid']) {
@@ -248,9 +229,6 @@ final class LegacyDataImporter
                 ->fetchColumn(),
             'mail_api' => (int) $connection
                 ->query('SELECT COUNT(*) FROM mail_api')
-                ->fetchColumn(),
-            'overtime_notification_settings' => (int) $connection
-                ->query('SELECT COUNT(*) FROM overtime_notification_settings')
                 ->fetchColumn(),
         ];
         $report['existing_counts'] = $existingCounts;
@@ -311,18 +289,6 @@ final class LegacyDataImporter
                 $report['mail_api_inserted']++;
             }
 
-            $overtimeStatement = $connection->prepare(
-                <<<'SQL'
-                    INSERT INTO overtime_notification_settings (
-                        id, message, channel_id
-                    ) VALUES (
-                        1, :message, :channel_id
-                    )
-                    SQL,
-            );
-            $overtimeStatement->execute($resolved['overtime']);
-            $report['overtime_inserted'] = 1;
-
             $connection->commit();
             $report['executed'] = true;
         } catch (Throwable) {
@@ -330,7 +296,6 @@ final class LegacyDataImporter
             $report['valid'] = false;
             $report['dating_inserted'] = 0;
             $report['mail_api_inserted'] = 0;
-            $report['overtime_inserted'] = 0;
             $report['abort_reason'] =
                 'Import transaction failed and was rolled back.';
         }
@@ -387,34 +352,20 @@ final class LegacyDataImporter
      * @param array<string, mixed> $channelMap
      * @param array<string, true> $usedChannelNames
      * @param list<string> $errors
-     * @return array{0: string|null, 1: string|null, 2: string|null}
+     * @return string|null
      */
     private function resolveSettings(
         array $settings,
         array $channelMap,
         array &$usedChannelNames,
         array &$errors,
-    ): array {
+    ): ?string {
         $datingChannelName = $settings['dating_channel'] ?? null;
-        $overtimeMessage = $settings['overtime_message'] ?? null;
-        $overtimeChannelName = $settings['overtime_channel'] ?? null;
 
         if (!is_string($datingChannelName) || $datingChannelName === '') {
             $errors[] = 'migration-settings.json: dating_channel must be '
                 . 'a non-empty string.';
             $datingChannelName = null;
-        }
-
-        if (!is_string($overtimeMessage) || $overtimeMessage === '') {
-            $errors[] = 'migration-settings.json: overtime_message must '
-                . 'be a non-empty string.';
-            $overtimeMessage = null;
-        }
-
-        if (!is_string($overtimeChannelName) || $overtimeChannelName === '') {
-            $errors[] = 'migration-settings.json: overtime_channel must '
-                . 'be a non-empty string.';
-            $overtimeChannelName = null;
         }
 
         $datingChannelId = $this->resolveChannelId(
@@ -427,18 +378,7 @@ final class LegacyDataImporter
             'migration-settings.json: dating_channel is mapped to an '
                 . 'invalid channel ID.',
         );
-        $overtimeChannelId = $this->resolveChannelId(
-            $overtimeChannelName,
-            $channelMap,
-            $usedChannelNames,
-            $errors,
-            'migration-settings.json: overtime_channel is not mapped to '
-                . 'a channel ID.',
-            'migration-settings.json: overtime_channel is mapped to an '
-                . 'invalid channel ID.',
-        );
-
-        return [$datingChannelId, $overtimeMessage, $overtimeChannelId];
+        return $datingChannelId;
     }
 
     /**

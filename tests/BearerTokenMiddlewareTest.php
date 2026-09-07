@@ -21,8 +21,6 @@ final class BearerTokenMiddlewareTest extends TestCase
                 $configuration['bearer_token']['scheduler'],
             '/api/dating/notify' =>
                 $configuration['bearer_token']['scheduler'],
-            '/api/overtime/notify' =>
-                $configuration['bearer_token']['overtime'],
         ];
 
         foreach ($protectedRoutes as $path => $token) {
@@ -42,56 +40,6 @@ final class BearerTokenMiddlewareTest extends TestCase
             $response = $middleware->process($request, $handler);
 
             self::assertSame(204, $response->getStatusCode());
-        }
-    }
-
-    public function testConfiguredTokensAreNotInterchangeable(): void
-    {
-        $configuration = require __DIR__ . '/../bootstrap/config.php';
-        $responseFactory = new ResponseFactory();
-        $tokenCombinations = [
-            [
-                '/api/mail/process',
-                $configuration['bearer_token']['scheduler'],
-                $configuration['bearer_token']['overtime'],
-            ],
-            [
-                '/api/dating/notify',
-                $configuration['bearer_token']['scheduler'],
-                $configuration['bearer_token']['overtime'],
-            ],
-            [
-                '/api/overtime/notify',
-                $configuration['bearer_token']['overtime'],
-                $configuration['bearer_token']['scheduler'],
-            ],
-        ];
-
-        foreach (
-            $tokenCombinations as [$path, $expectedToken, $providedToken]
-        ) {
-            $middleware = new BearerTokenMiddleware(
-                $expectedToken,
-                $responseFactory,
-            );
-            $handler = $this->createMock(RequestHandlerInterface::class);
-            $handler->expects(self::never())->method('handle');
-            $request = (new ServerRequestFactory())
-                ->createServerRequest('POST', $path)
-                ->withHeader('Authorization', 'Bearer ' . $providedToken);
-
-            $response = $middleware->process($request, $handler);
-            $responseBody = (string) $response->getBody();
-
-            self::assertSame(401, $response->getStatusCode());
-            self::assertStringNotContainsString(
-                $expectedToken,
-                $responseBody,
-            );
-            self::assertStringNotContainsString(
-                $providedToken,
-                $responseBody,
-            );
         }
     }
 

@@ -36,7 +36,6 @@ final class ConfigurationTest extends TestCase
                 ],
                 'bearer_token' => [
                     'scheduler' => 'example_scheduler_bearer_token',
-                    'overtime' => 'example_overtime_bearer_token',
                 ],
             ],
             $configuration,
@@ -58,7 +57,6 @@ final class ConfigurationTest extends TestCase
             'IMAP_USERNAME',
             'IMAP_PASSWORD',
             'SCHEDULER_BEARER_TOKEN',
-            'OVERTIME_BEARER_TOKEN',
         ];
 
         foreach ($requiredEnvironmentVariables as $environmentVariable) {

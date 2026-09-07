@@ -36,16 +36,6 @@ $printReport = static function (array $report): void {
         }
     }
 
-    if ($report['overtime'] !== null) {
-        foreach ($report['overtime'] as $key => $value) {
-            $lines[] = sprintf(
-                'overtime.%s: %s',
-                $key,
-                $value ? 'true' : 'false',
-            );
-        }
-    }
-
     fwrite(STDOUT, implode("\n", $lines) . "\n");
 };
 
@@ -135,7 +125,6 @@ exit(
     $report['valid']
         && ($report['dating']['mismatched_count'] ?? 1) === 0
         && ($report['mail_api']['mismatched_count'] ?? 1) === 0
-        && ($report['overtime']['matched'] ?? false) === true
         ? 0
         : 1
 );

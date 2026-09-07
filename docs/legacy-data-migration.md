@@ -1,6 +1,6 @@
 # 旧環境データの移行(Issue #15)
 
-旧BvlionBatch4(`dating`・`mail_api`)と旧HomeServer(残業通知)のデータをBvlionBatch5の本番DBへ移行する手順です。実データ・認証情報・実際のチャンネル名やIDは、このリポジトリのいかなるファイルにも含めません。
+旧BvlionBatch4(`dating`・`mail_api`)のデータをBvlionBatch5の本番DBへ移行する手順です。実データ・認証情報・実際のチャンネル名やIDは、このリポジトリのいかなるファイルにも含めません。
 
 以下の手順はすべて貴方(リポジトリ運用者)が実行してください。このリポジトリのツールは実行主体になりません。本番移行では、エクスポート・インポート・検証・本番マイグレーションのすべての工程をXServer上のPHP 8.5.5 CLI(`/opt/php-8.5.5/bin/php`)で実行しました。
 
@@ -9,7 +9,7 @@
 
 ## 0. 前提
 
-- 移行対象は `dating`・`mail_api`・`overtime_notification_settings` の3テーブルです。
+- 移行対象は `dating`・`mail_api` の2テーブルです。
 - `mail_api.channel_id` は本Issueのマイグレーションで `NULL` を許容します。旧環境でSlack投稿がスキップされていた行は、`channel_id = NULL` として移行し、新環境でも同様にSlack投稿だけをスキップします。
 - 旧`dating`・旧`mail_api`の主キー(`pk`)は、新環境の`id`へそのまま引き継ぎます。
 - `mail_api`の`user_name`・`icon_url`・`prefix_format`(Slack投稿の表示名・アイコン・受信日時書式)は、Issue #44のマイグレーションで追加した列です。`bin/export-legacy-data.php`は元からこの3項目を`mail_api.json`へ含めているため、エクスポートをやり直す必要はありません。Issue #15で本番へ通常import済みの44件へこの3項目だけを安全に補完する手順は、9節を参照してください。
@@ -22,7 +22,6 @@
   | `mail_api.enable_flag = 1`(有効) | 43 |
   | `mail_api.enable_flag = 0`(無効) | 1 |
   | 移行後に`channel_id = NULL`となる`mail_api`行 | 31 |
-  | 残業通知設定(新規登録) | 1 |
 
   `bin/import-legacy-data.php`・`bin/verify-legacy-migration.php`はこれらの件数を既定値として検証し、入力ファイルの件数がこれと一致しない場合は`valid: false`としてDBへ書き込みません。
 
@@ -126,14 +125,11 @@ DB接続情報は`--env-file`で指定したファイルからのみ読み込み
 
 ```json
 {
-  "dating_channel": "<旧Slackチャンネル名>",
-  "overtime_message": "<残業通知の文面>",
-  "overtime_channel": "<旧Slackチャンネル名>"
+  "dating_channel": "<旧Slackチャンネル名>"
 }
 ```
 
 - `dating_channel` は旧`CheckDating`が固定で使用していたチャンネル名です。
-- `overtime_message` / `overtime_channel` は旧HomeServerに設定テーブルがないため、新規に決めた文面・チャンネル名を記載します。
 
 `channel_map.json`:
 
@@ -143,7 +139,7 @@ DB接続情報は`--env-file`で指定したファイルからのみ読み込み
 }
 ```
 
-`mail_api.json` 内の `channel` 値、および `migration-settings.json` の `dating_channel`・`overtime_channel` を解決するために必要な、すべての旧チャンネル名を含めてください。ただし、`mail_api.json`の各行のうち `channel`・`user_name`・`icon_url`・`prefix_format` のいずれかが `null` の行は、`channel` の値が対応表になくてもエラーになりません(その行は`channel_id = NULL`として移行されるため、変換を行わないからです)。
+`mail_api.json` 内の `channel` 値、および `migration-settings.json` の `dating_channel` を解決するために必要な、すべての旧チャンネル名を含めてください。ただし、`mail_api.json`の各行のうち `channel`・`user_name`・`icon_url`・`prefix_format` のいずれかが `null` の行は、`channel` の値が対応表になくてもエラーになりません(その行は`channel_id = NULL`として移行されるため、変換を行わないからです)。
 
 ## 5. dry-run
 
@@ -156,7 +152,7 @@ DB接続情報は`--env-file`で指定したファイルからのみ読み込み
   --dry-run
 ```
 
-`--dry-run`でもDBへ接続し、`dating`・`mail_api`・`overtime_notification_settings`の既存件数を確認します(書き込みは行いません)。次を確認してください。
+`--dry-run`でもDBへ接続し、`dating`・`mail_api`の既存件数を確認します(書き込みは行いません)。次を確認してください。
 
 - `valid: true`
 - `expected_counts.*`の`matches`がすべて`true`(0節の確認済み件数と入力件数が一致していることを表します)
@@ -178,7 +174,7 @@ DB接続情報は`--env-file`で指定したファイルからのみ読み込み
   --channel-map=<migration-work-directory>/channel_map.json
 ```
 
-- `dating`・`mail_api`・`overtime_notification_settings` のいずれかに既存データがある場合、何も書き込まずに `abort_reason` を表示して終了します。
+- `dating`・`mail_api` のいずれかに既存データがある場合、何も書き込まずに `abort_reason` を表示して終了します。
 - 対象テーブルがすべて空の場合のみ、1トランザクション内で全件INSERTします。途中で失敗した場合は自動的にロールバックされ、`executed: false` になります。
 - 成功後にこのコマンドを再実行すると、テーブルが空でなくなっているため、必ず中止されます(二重投入は起きません)。
 
@@ -198,7 +194,6 @@ DB接続情報は`--env-file`で指定したファイルからのみ読み込み
 - `dating.required_field_violation_count` / `mail_api.required_field_violation_count` がいずれも `0`
 - `mail_api.expected_null_channel_id_count` と `mail_api.actual_null_channel_id_count` が一致(31)
 - `mail_api.enabled_count_expected` と `enabled_count_actual` が一致(43)、`disabled_count_expected` と `disabled_count_actual` が一致(1)
-- `overtime.matched: true`
 
 ## 9. 既存44件への表示用データ補完(Issue #44)
 
@@ -263,11 +258,11 @@ dry-runの結果が問題なければ、`--dry-run`を外して本実行しま�
 
 `mail_api.mismatched_count: 0`を確認してください(`user_name`・`icon_url`・`prefix_format`も比較対象に含まれます)。実際の値は出力されません。
 
-## 10. 3機能の本番相当確認
+## 10. 2機能の本番相当確認
 
-READMEの各機能節(記念日通知・メール処理・残業通知)に沿って、本番相当の確認を行ってください。`channel_id`が`NULL`のメール処理ルールに一致するメールは、Slack投稿なしで既読化・移動されることも確認してください。Slack投稿ありのメール処理ルールでは、9節で補完した表示名・アイコン・受信日時がSlackへ反映されることも確認してください。残業通知はSlackへ実際に投稿されるため、実行前に必ず承認を得てから行ってください。
+READMEの各機能節(記念日通知・メール処理)に沿って、本番相当の確認を行ってください。`channel_id`が`NULL`のメール処理ルールに一致するメールは、Slack投稿なしで既読化・移動されることも確認してください。Slack投稿ありのメール処理ルールでは、9節で補完した表示名・アイコン・受信日時がSlackへ反映されることも確認してください。
 
-本番移行では、記念日通知・残業通知・メール処理の3機能について本番相当確認を完了しています。メール処理では、Slackのカスタム表示名・カスタムアイコン・受信日時の表示、件名・本文の投稿、既読化、日本語フォルダへの移動、および`POST /api/mail/process`の`success: true` / `failure_count: 0`を確認しました。日本語フォルダへの移動は、`imap_mail_move()`へ渡す移動先フォルダ名をUTF7-IMAPへ変換する対応(Issue #46 / PR #47)を適用した状態で確認しています。
+本番移行では、記念日通知・メール処理の2機能について本番相当確認を完了しています。メール処理では、Slackのカスタム表示名・カスタムアイコン・受信日時の表示、件名・本文の投稿、既読化、日本語フォルダへの移動、および`POST /api/mail/process`の`success: true` / `failure_count: 0`を確認しました。日本語フォルダへの移動は、`imap_mail_move()`へ渡す移動先フォルダ名をUTF7-IMAPへ変換する対応(Issue #46 / PR #47)を適用した状態で確認しています。
 
 ## 11. 後片付け
 
@@ -318,4 +313,4 @@ rmdir <migration-work-directory>
 
 - **本実行のトランザクション中の失敗**：自動的にロールバックされます。対象テーブルは実行前の状態(空)のまま残るため、入力ファイルを修正したうえで本実行をやり直せます。
 - **本実行の成功後に問題が判明した場合**：`TRUNCATE`による即時のやり直しは案内しません。6節で`mysqldump`により取得したバックアップからの復元を基本とし、具体的な復元コマンドはXServerで実際に利用できる方法に従ってください。
-- **3機能の本番相当確認で問題が判明した場合**：残業通知など実際にSlackへ投稿する確認は、問題が解消してから改めて承認のうえ実行してください。
+- **2機能の本番相当確認で問題が判明した場合**：問題が解消してから本番相当確認をやり直してください。

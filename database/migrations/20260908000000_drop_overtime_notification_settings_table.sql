@@ -1,0 +1,1 @@
+DROP TABLE overtime_notification_settings;

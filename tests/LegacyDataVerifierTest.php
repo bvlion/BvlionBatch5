@@ -36,13 +36,7 @@ final class LegacyDataVerifierTest extends TestCase
      */
     private array $mailApiRows;
 
-    /**
-     * @var array{
-     *     dating_channel: string,
-     *     overtime_message: string,
-     *     overtime_channel: string
-     * }
-     */
+    /** @var array{dating_channel: string} */
     private array $settings;
 
     /**
@@ -71,7 +65,6 @@ final class LegacyDataVerifierTest extends TestCase
             expectedMailApiEnabledCount: 1,
             expectedMailApiDisabledCount: 1,
             expectedMailApiNullChannelCount: 1,
-            expectedOvertimeCount: 1,
         );
         $this->verifier = new LegacyDataVerifier(
             $this->connectionFactory,
@@ -106,8 +99,6 @@ final class LegacyDataVerifierTest extends TestCase
         ];
         $this->settings = [
             'dating_channel' => 'example-legacy-channel',
-            'overtime_message' => 'Example overtime message.',
-            'overtime_channel' => 'example-legacy-channel',
         ];
         $this->channelMap = ['example-legacy-channel' => 'C0000000000'];
     }
@@ -125,7 +116,6 @@ final class LegacyDataVerifierTest extends TestCase
     {
         $this->connection->exec('DELETE FROM mail_api');
         $this->connection->exec('DELETE FROM dating');
-        $this->connection->exec('DELETE FROM overtime_notification_settings');
     }
 
     private function importFixture(): void
@@ -173,9 +163,6 @@ final class LegacyDataVerifierTest extends TestCase
             1,
             $report['mail_api']['actual_null_channel_id_count'],
         );
-        self::assertTrue($report['overtime']['expected_present']);
-        self::assertTrue($report['overtime']['actual_present']);
-        self::assertTrue($report['overtime']['matched']);
     }
 
     public function testContentDifferenceIsDetectedAtItsPosition(): void
@@ -246,26 +233,5 @@ final class LegacyDataVerifierTest extends TestCase
         self::assertNotEmpty($report['errors']);
         self::assertNull($report['dating']);
         self::assertNull($report['mail_api']);
-        self::assertNull($report['overtime']);
-    }
-
-    public function testOvertimeMismatchIsDetected(): void
-    {
-        $this->importFixture();
-        $this->connection->exec(
-            "UPDATE overtime_notification_settings "
-                . "SET message = 'Changed.' WHERE id = 1",
-        );
-
-        $report = $this->verifier->verify(
-            $this->datingRows,
-            $this->mailApiRows,
-            $this->settings,
-            $this->channelMap,
-        );
-
-        self::assertTrue($report['overtime']['expected_present']);
-        self::assertTrue($report['overtime']['actual_present']);
-        self::assertFalse($report['overtime']['matched']);
     }
 }

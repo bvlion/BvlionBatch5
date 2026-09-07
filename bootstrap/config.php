@@ -20,7 +20,6 @@ $requiredEnvironmentVariables = [
     'IMAP_USERNAME',
     'IMAP_PASSWORD',
     'SCHEDULER_BEARER_TOKEN',
-    'OVERTIME_BEARER_TOKEN',
 ];
 
 $dotenv->required($requiredEnvironmentVariables)->notEmpty();
@@ -48,7 +47,5 @@ return [
     'bearer_token' => [
         'scheduler' => $_ENV['SCHEDULER_BEARER_TOKEN']
             ?? $_SERVER['SCHEDULER_BEARER_TOKEN'],
-        'overtime' => $_ENV['OVERTIME_BEARER_TOKEN']
-            ?? $_SERVER['OVERTIME_BEARER_TOKEN'],
     ],
 ];
