@@ -342,6 +342,97 @@ final class MimeMessageDecoderTest extends TestCase
         self::assertSame(['1.2'], $fetchedPartNumbers);
     }
 
+    public function testDecodesContentIdInlineImageWithHtmlBody(): void
+    {
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
+        $encodedImage = base64_encode($imageContent);
+        $structure = (object) [
+            'type' => TYPEMULTIPART,
+            'subtype' => 'RELATED',
+            'parts' => [
+                (object) [
+                    'type' => TYPETEXT,
+                    'subtype' => 'HTML',
+                    'encoding' => ENC7BIT,
+                    'bytes' => 100,
+                ],
+                (object) [
+                    'type' => TYPEIMAGE,
+                    'subtype' => 'PNG',
+                    'encoding' => ENCBASE64,
+                    'bytes' => strlen($encodedImage),
+                    'disposition' => 'INLINE',
+                    'id' => '<logo@example.test>',
+                ],
+            ],
+        ];
+        $partBodies = [
+            '1' => '<p><img src="cid:logo@example.test"></p>',
+            '2' => $encodedImage,
+        ];
+        $inlineImages = [];
+
+        $body = (new MimeMessageDecoder())->decodeHtmlBody(
+            $structure,
+            static fn (string $partNumber): string|false =>
+                $partBodies[$partNumber] ?? false,
+            $inlineImages,
+        );
+
+        self::assertSame($partBodies['1'], $body);
+        self::assertSame(
+            [
+                'logo@example.test' => [
+                    'content_type' => 'image/png',
+                    'content' => $imageContent,
+                ],
+            ],
+            $inlineImages,
+        );
+    }
+
+    public function testInvalidInlineImageDoesNotFailHtmlBodyDecoding(): void
+    {
+        $structure = (object) [
+            'type' => TYPEMULTIPART,
+            'subtype' => 'RELATED',
+            'parts' => [
+                (object) [
+                    'type' => TYPETEXT,
+                    'subtype' => 'HTML',
+                    'encoding' => ENC7BIT,
+                    'bytes' => 100,
+                ],
+                (object) [
+                    'type' => TYPEIMAGE,
+                    'subtype' => 'PNG',
+                    'encoding' => ENCBASE64,
+                    'bytes' => 20,
+                    'disposition' => 'INLINE',
+                    'id' => '<invalid@example.test>',
+                ],
+            ],
+        ];
+        $inlineImages = [];
+
+        $body = (new MimeMessageDecoder())->decodeHtmlBody(
+            $structure,
+            static fn (string $partNumber): string => match ($partNumber) {
+                '1' => '<p>Example HTML body.</p>',
+                '2' => 'invalid-base64',
+            },
+            $inlineImages,
+        );
+
+        self::assertSame('<p>Example HTML body.</p>', $body);
+        self::assertSame([], $inlineImages);
+    }
+
     public function testPlainOnlyReturnsEmptyHtmlBody(): void
     {
         $structure = (object) [

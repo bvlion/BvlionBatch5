@@ -29,6 +29,8 @@ final class MimeMessageDecoder
      */
     private const MAX_ENCODED_HTML_BYTES = HtmlToPdfConverter::MAX_HTML_BYTES
         * 4;
+    private const MAX_ENCODED_IMAGE_BYTES = HtmlToPdfConverter::MAX_IMAGE_BYTES
+        * 4;
 
     public function decodeSubject(string $encodedSubject): string
     {
@@ -93,19 +95,27 @@ final class MimeMessageDecoder
     /**
      * @param callable(string): (string|false) $bodyFetcher
      *        IMAPのsection番号（例: 1、1.2）を受け取ります。
+     * @param array<string, array{content_type: string, content: string}>|null
+     *        $inlineImages Content-IDをキーとするinline画像です。
      */
     public function decodeHtmlBody(
         stdClass $structure,
         callable $bodyFetcher,
+        ?array &$inlineImages = null,
     ): string {
-        return $this->findBodyBySubtype(
+        $totalInlineImageBytes = 0;
+        $body = $this->findBodyBySubtype(
             $structure,
             (int) ($structure->type ?? -1) === TYPEMULTIPART ? '' : '1',
             $bodyFetcher,
             'HTML',
             self::MAX_ENCODED_HTML_BYTES,
             HtmlToPdfConverter::MAX_HTML_BYTES,
-        ) ?? '';
+            $inlineImages,
+            $totalInlineImageBytes,
+        );
+
+        return $body ?? '';
     }
 
     /**
@@ -117,6 +127,9 @@ final class MimeMessageDecoder
      * @param int|null $maxDecodedBytes Checked against the body
      *        after transfer decoding, and again after UTF-8
      *        conversion. Null disables this check.
+     * @param array<string, array{content_type: string, content: string}>|null
+     *        $inlineImages Content-IDをキーとするinline画像です。
+     * @param bool $shouldFindBody falseの場合は画像だけを探索します。
      */
     private function findBodyBySubtype(
         stdClass $part,
@@ -125,7 +138,91 @@ final class MimeMessageDecoder
         string $subtype,
         ?int $maxEncodedBytes = null,
         ?int $maxDecodedBytes = null,
+        ?array &$inlineImages = null,
+        ?int &$totalInlineImageBytes = null,
+        bool $shouldFindBody = true,
     ): ?string {
+        $partType = (int) ($part->type ?? -1);
+        $disposition = strtoupper((string) ($part->disposition ?? ''));
+
+        if (
+            $inlineImages !== null
+            && $partType === TYPEIMAGE
+            && $disposition !== 'ATTACHMENT'
+        ) {
+            $contentId = strtolower(trim(
+                (string) ($part->id ?? ''),
+                "<> \t\r\n",
+            ));
+            $contentTypes = [
+                'GIF' => 'image/gif',
+                'JPEG' => 'image/jpeg',
+                'JPG' => 'image/jpeg',
+                'PNG' => 'image/png',
+                'WEBP' => 'image/webp',
+            ];
+            $contentType = $contentTypes[
+                strtoupper((string) ($part->subtype ?? ''))
+            ] ?? null;
+            $declaredBytes = $part->bytes ?? null;
+
+            if (
+                $contentId === ''
+                || $contentType === null
+                || isset($inlineImages[$contentId])
+                || !is_numeric($declaredBytes)
+                || (int) $declaredBytes > self::MAX_ENCODED_IMAGE_BYTES
+            ) {
+                return null;
+            }
+
+            $content = $bodyFetcher($partNumber);
+
+            if (
+                $content === false
+                || strlen($content) > self::MAX_ENCODED_IMAGE_BYTES
+            ) {
+                return null;
+            }
+
+            $encoding = (int) ($part->encoding ?? ENC7BIT);
+
+            if ($encoding === ENCBASE64) {
+                $decodedContent = base64_decode($content, true);
+
+                if ($decodedContent === false) {
+                    return null;
+                }
+
+                $content = $decodedContent;
+            } elseif ($encoding === ENCQUOTEDPRINTABLE) {
+                $content = quoted_printable_decode($content);
+            }
+
+            $imageInformation = @getimagesizefromstring($content);
+            $actualContentType = is_array($imageInformation)
+                ? ($imageInformation['mime'] ?? null)
+                : null;
+
+            if (
+                strlen($content) > HtmlToPdfConverter::MAX_IMAGE_BYTES
+                || ($totalInlineImageBytes ?? 0) + strlen($content)
+                    > HtmlToPdfConverter::MAX_TOTAL_IMAGE_BYTES
+                || $actualContentType !== $contentType
+            ) {
+                return null;
+            }
+
+            $inlineImages[$contentId] = [
+                'content_type' => $contentType,
+                'content' => $content,
+            ];
+            $totalInlineImageBytes = ($totalInlineImageBytes ?? 0)
+                + strlen($content);
+
+            return null;
+        }
+
         $isAttachment = strtoupper(
             (string) ($part->disposition ?? ''),
         ) === 'ATTACHMENT';
@@ -156,12 +253,14 @@ final class MimeMessageDecoder
             return null;
         }
 
-        if ((int) ($part->type ?? -1) === TYPEMULTIPART) {
+        if ($partType === TYPEMULTIPART) {
             $parts = $part->parts ?? [];
 
             if (!is_array($parts)) {
                 return null;
             }
+
+            $foundBody = null;
 
             foreach ($parts as $index => $childPart) {
                 if (!$childPart instanceof stdClass) {
@@ -178,18 +277,29 @@ final class MimeMessageDecoder
                     $subtype,
                     $maxEncodedBytes,
                     $maxDecodedBytes,
+                    $inlineImages,
+                    $totalInlineImageBytes,
+                    $foundBody === null,
                 );
 
-                if ($body !== null) {
-                    return $body;
+                if ($body !== null && $foundBody === null) {
+                    $foundBody = $body;
+
+                    if ($inlineImages === null) {
+                        return $foundBody;
+                    }
                 }
             }
 
+            return $foundBody;
+        }
+
+        if (!$shouldFindBody) {
             return null;
         }
 
         if (
-            (int) ($part->type ?? -1) !== TYPETEXT
+            $partType !== TYPETEXT
             || strtoupper((string) ($part->subtype ?? '')) !== $subtype
         ) {
             return null;

@@ -5,6 +5,7 @@
     "require": {
         "ext-curl": "*",
         "ext-dom": "*",
+        "ext-gd": "*",
         "ext-imap": "*",
         "ext-mbstring": "*",
         "ext-pdo": "*",

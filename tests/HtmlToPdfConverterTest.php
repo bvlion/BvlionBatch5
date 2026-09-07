@@ -6,6 +6,11 @@ namespace BvlionBatch5\Tests;
 
 use BvlionBatch5\Mail\HtmlToPdfConverter;
 use FontLib\Font;
+use GuzzleHttp\Client;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
@@ -174,16 +179,198 @@ final class HtmlToPdfConverterTest extends TestCase
         (new HtmlToPdfConverter())->convert($oversizedHtml);
     }
 
-    public function testRemoteImageReferenceDoesNotFailConversion(): void
+    public function testEmbedsContentIdImageInPdf(): void
     {
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
+
         $pdf = (new HtmlToPdfConverter())->convert(
-            '<html><body>'
-            . '<img src="https://example.test/example.png">'
-            . '<p>Example body with a remote image reference.</p>'
-            . '</body></html>',
+            '<html><body><img src="cid:logo%40example.test">'
+                . '<p>Example body.</p></body></html>',
+            [
+                'logo@example.test' => [
+                    'content_type' => 'image/png',
+                    'content' => $imageContent,
+                ],
+            ],
         );
 
         self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertStringContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testFetchesAndEmbedsPublicHttpImageInPdf(): void
+    {
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create(new MockHandler([
+            new Response(
+                200,
+                [
+                    'Content-Type' => 'image/png',
+                    'Content-Length' => (string) strlen($imageContent),
+                ],
+                $imageContent,
+            ),
+        ]));
+        $handlerStack->push(Middleware::history($requestHistory));
+
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+                . '<img src="https://images.example.test/logo.png">'
+                . '<p>Example body.</p></body></html>',
+            [],
+            new Client(['handler' => $handlerStack]),
+            static function (string $host): array {
+                self::assertSame('images.example.test', $host);
+
+                return ['93.184.216.34'];
+            },
+        );
+
+        self::assertCount(1, $requestHistory);
+        self::assertFalse(
+            $requestHistory[0]['options']['allow_redirects'],
+        );
+        self::assertSame(
+            3,
+            $requestHistory[0]['options']['connect_timeout'],
+        );
+        self::assertLessThanOrEqual(
+            10,
+            $requestHistory[0]['options']['timeout'],
+        );
+        self::assertArrayHasKey(
+            CURLOPT_RESOLVE,
+            $requestHistory[0]['options']['curl'],
+        );
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertStringContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testRejectsPrivateAddressWithoutHttpRequest(): void
+    {
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create(new MockHandler([
+            new Response(200, ['Content-Type' => 'image/png'], 'unused'),
+        ]));
+        $handlerStack->push(Middleware::history($requestHistory));
+
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body><img src="http://127.0.0.1/private.png">'
+                . '<p>Example body.</p></body></html>',
+            [],
+            new Client(['handler' => $handlerStack]),
+        );
+
+        self::assertCount(0, $requestHistory);
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertStringNotContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testRejectsHostnameResolvingToNonPublicAddress(): void
+    {
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create(new MockHandler([
+            new Response(200, ['Content-Type' => 'image/png'], 'unused'),
+        ]));
+        $handlerStack->push(Middleware::history($requestHistory));
+
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+                . '<img src="https://images.example.test/private.png">'
+                . '<p>Example body.</p></body></html>',
+            [],
+            new Client(['handler' => $handlerStack]),
+            static fn (string $host): array => ['100.64.0.1'],
+        );
+
+        self::assertCount(0, $requestHistory);
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertStringNotContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testRejectsPrivateRedirectTarget(): void
+    {
+        $requestHistory = [];
+        $handlerStack = HandlerStack::create(new MockHandler([
+            new Response(
+                302,
+                ['Location' => 'http://169.254.169.254/example.png'],
+            ),
+            new Response(200, ['Content-Type' => 'image/png'], 'unused'),
+        ]));
+        $handlerStack->push(Middleware::history($requestHistory));
+
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+                . '<img src="https://images.example.test/redirect.png">'
+                . '<p>Example body.</p></body></html>',
+            [],
+            new Client(['handler' => $handlerStack]),
+            static fn (string $host): array => ['93.184.216.34'],
+        );
+
+        self::assertCount(1, $requestHistory);
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertStringNotContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testImageFetchFailureDoesNotFailConversion(): void
+    {
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+                . '<img src="https://images.example.test/missing.png">'
+                . '<p>Example body with a missing image.</p>'
+                . '</body></html>',
+            [],
+            new Client([
+                'handler' => new MockHandler([
+                    new Response(503, ['Content-Type' => 'image/png']),
+                ]),
+            ]),
+            static fn (string $host): array => ['93.184.216.34'],
+        );
+
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertStringNotContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testRejectsOversizedImageFromContentLength(): void
+    {
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+                . '<img src="https://images.example.test/large.png">'
+                . '<p>Example body.</p></body></html>',
+            [],
+            new Client([
+                'handler' => new MockHandler([
+                    new Response(
+                        200,
+                        [
+                            'Content-Type' => 'image/png',
+                            'Content-Length' => (string) (
+                                HtmlToPdfConverter::MAX_IMAGE_BYTES + 1
+                            ),
+                        ],
+                        'unused',
+                    ),
+                ]),
+            ]),
+            static fn (string $host): array => ['93.184.216.34'],
+        );
+
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertStringNotContainsString('/Subtype /Image', $pdf);
     }
 
     /**

@@ -615,6 +615,7 @@ namespace BvlionBatch5\Tests {
                     '<p>Example HTML body.</p>',
                     $result['html_body'],
                 );
+                self::assertSame([], $result['inline_images']);
             } finally {
                 $mailbox->disconnect();
             }
@@ -653,6 +654,7 @@ namespace BvlionBatch5\Tests {
 
                 self::assertSame('Example body.', $result['body']);
                 self::assertSame('', $result['html_body']);
+                self::assertSame([], $result['inline_images']);
             } finally {
                 $mailbox->disconnect();
             }

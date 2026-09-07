@@ -1103,6 +1103,12 @@ final class MailProcessingServiceTest extends TestCase
 
     public function testHtmlAndPlainMailIsPostedAsPdfFile(): void
     {
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
         $mailRuleRepository = $this->createStub(MailRuleRepository::class);
         $mailRuleRepository->method('findEnabledRules')->willReturn([
             [
@@ -1127,7 +1133,14 @@ final class MailProcessingServiceTest extends TestCase
         $mailbox->method('readMessage')->willReturn([
             'subject' => 'Example subject.',
             'body' => 'Example plain body.',
-            'html_body' => '<p>Example HTML body.</p>',
+            'html_body' => '<p><img src="cid:logo@example.test">'
+                . 'Example HTML body.</p>',
+            'inline_images' => [
+                'logo@example.test' => [
+                    'content_type' => 'image/png',
+                    'content' => $imageContent,
+                ],
+            ],
             'received_at' => $this->exampleReceivedAt(),
         ]);
         $mailbox
@@ -1186,6 +1199,10 @@ final class MailProcessingServiceTest extends TestCase
         );
         self::assertStringStartsWith(
             '%PDF-',
+            (string) $requestHistory[1]['request']->getBody(),
+        );
+        self::assertStringContainsString(
+            '/Subtype /Image',
             (string) $requestHistory[1]['request']->getBody(),
         );
         self::assertSame(

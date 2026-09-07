@@ -6,11 +6,16 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
         libc-client-dev \
+        libfreetype6-dev \
+        libjpeg62-turbo-dev \
         libkrb5-dev \
         libonig-dev \
+        libpng-dev \
         libssl-dev \
+        libwebp-dev \
         unzip \
-    && docker-php-ext-install mbstring pdo_mysql \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-install gd mbstring pdo_mysql \
     && pecl install imap-1.0.3 \
     && docker-php-ext-enable imap \
     && rm -rf /var/lib/apt/lists/*

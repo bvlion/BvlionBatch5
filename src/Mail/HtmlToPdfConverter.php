@@ -4,8 +4,14 @@ declare(strict_types=1);
 
 namespace BvlionBatch5\Mail;
 
+use DOMDocument;
+use DOMElement;
 use Dompdf\Dompdf;
 use Dompdf\Options;
+use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\UriResolver;
 use RuntimeException;
 use Throwable;
 
@@ -56,6 +62,11 @@ final class HtmlToPdfConverter
      * whatever HTML this method is ever called with directly.
      */
     public const MAX_HTML_BYTES = 5_000_000;
+    public const MAX_IMAGE_BYTES = 2_000_000;
+    public const MAX_TOTAL_IMAGE_BYTES = 4_000_000;
+    private const IMAGE_CONNECT_TIMEOUT_SECONDS = 3;
+    private const IMAGE_TIMEOUT_SECONDS = 10;
+    private const MAX_IMAGE_REDIRECTS = 3;
 
     /**
      * Every font family name Dompdf itself ships in
@@ -89,13 +100,475 @@ final class HtmlToPdfConverter
         'dejavu serif',
     ];
 
-    public function convert(string $html): string
-    {
+    /**
+     * @param array<string, array{content_type: string, content: string}>
+     *        $inlineImages Content-IDをキーとするinline画像です。
+     * @param callable(string): list<string>|null $hostResolver
+     */
+    public function convert(
+        string $html,
+        array $inlineImages = [],
+        ?ClientInterface $httpClient = null,
+        ?callable $hostResolver = null,
+    ): string {
         if (strlen($html) > self::MAX_HTML_BYTES) {
             throw new RuntimeException(
                 'HTML body exceeds the maximum size allowed for PDF '
                     . 'conversion.',
             );
+        }
+
+        $allowedContentTypes = [
+            'image/gif',
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+        ];
+        $document = new DOMDocument();
+        $previousInternalErrors = libxml_use_internal_errors(true);
+
+        try {
+            $isLoaded = $document->loadHTML(
+                '<?xml encoding="UTF-8">' . $html,
+                LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD,
+            );
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousInternalErrors);
+        }
+
+        if ($isLoaded) {
+            foreach (iterator_to_array($document->childNodes) as $childNode) {
+                if ($childNode->nodeType === XML_PI_NODE) {
+                    $document->removeChild($childNode);
+                }
+            }
+
+            /** @var array<string, string|null> $resolvedImages */
+            $resolvedImages = [];
+            $totalImageBytes = 0;
+
+            foreach ($document->getElementsByTagName('img') as $image) {
+                if (!$image instanceof DOMElement) {
+                    continue;
+                }
+
+                $source = trim($image->getAttribute('src'));
+
+                if ($source === '') {
+                    continue;
+                }
+
+                $dataUri = null;
+                $resourceKey = $source;
+                $lowerSource = strtolower($source);
+
+                if (str_starts_with($lowerSource, 'cid:')) {
+                    $contentId = strtolower(trim(
+                        rawurldecode(substr($source, 4)),
+                        "<> \t\r\n",
+                    ));
+                    $resourceKey = 'cid:' . $contentId;
+
+                    if (array_key_exists($resourceKey, $resolvedImages)) {
+                        $dataUri = $resolvedImages[$resourceKey];
+                    } else {
+                        $inlineImage = $inlineImages[$contentId] ?? null;
+                        $contentType = is_array($inlineImage)
+                            ? ($inlineImage['content_type'] ?? null)
+                            : null;
+                        $content = is_array($inlineImage)
+                            ? ($inlineImage['content'] ?? null)
+                            : null;
+                        $imageInformation = is_string($content)
+                            ? @getimagesizefromstring($content)
+                            : false;
+                        $actualContentType = is_array($imageInformation)
+                            ? ($imageInformation['mime'] ?? null)
+                            : null;
+
+                        if (
+                            is_string($contentType)
+                            && in_array(
+                                $contentType,
+                                $allowedContentTypes,
+                                true,
+                            )
+                            && is_string($content)
+                            && strlen($content) <= self::MAX_IMAGE_BYTES
+                            && $totalImageBytes + strlen($content)
+                                <= self::MAX_TOTAL_IMAGE_BYTES
+                            && $actualContentType === $contentType
+                        ) {
+                            $dataUri = 'data:' . $contentType . ';base64,'
+                                . base64_encode($content);
+                            $totalImageBytes += strlen($content);
+                        }
+
+                        $resolvedImages[$resourceKey] = $dataUri;
+                    }
+                } elseif (
+                    str_starts_with($lowerSource, 'http://')
+                    || str_starts_with($lowerSource, 'https://')
+                ) {
+                    if (array_key_exists($resourceKey, $resolvedImages)) {
+                        $dataUri = $resolvedImages[$resourceKey];
+                    } else {
+                        $currentUrl = $source;
+                        $deadline = microtime(true)
+                            + self::IMAGE_TIMEOUT_SECONDS;
+                        $redirectCount = 0;
+                        $httpClient ??= new Client();
+
+                        try {
+                            while (true) {
+                                $currentUri = new Uri($currentUrl);
+                                $scheme = strtolower(
+                                    $currentUri->getScheme(),
+                                );
+                                $host = $currentUri->getHost();
+                                $resolvedHost = strtolower(trim($host, '[]'));
+
+                                if (
+                                    !in_array(
+                                        $scheme,
+                                        ['http', 'https'],
+                                        true,
+                                    )
+                                    || $resolvedHost === ''
+                                    || $currentUri->getUserInfo() !== ''
+                                ) {
+                                    break;
+                                }
+
+                                $port = $currentUri->getPort()
+                                    !== null
+                                    ? $currentUri->getPort()
+                                    : ($scheme === 'https' ? 443 : 80);
+
+                                if ($port < 1 || $port > 65535) {
+                                    break;
+                                }
+
+                                $isLiteralIp = filter_var(
+                                    $resolvedHost,
+                                    FILTER_VALIDATE_IP,
+                                ) !== false;
+
+                                if ($isLiteralIp) {
+                                    $addresses = [$resolvedHost];
+                                } elseif (
+                                    filter_var(
+                                        $resolvedHost,
+                                        FILTER_VALIDATE_DOMAIN,
+                                        FILTER_FLAG_HOSTNAME,
+                                    ) !== false
+                                ) {
+                                    if ($hostResolver !== null) {
+                                        $addresses = $hostResolver(
+                                            $resolvedHost,
+                                        );
+                                    } else {
+                                        $records = @dns_get_record(
+                                            $resolvedHost,
+                                            DNS_A | DNS_AAAA,
+                                        );
+                                        $addresses = [];
+
+                                        if (is_array($records)) {
+                                            foreach ($records as $record) {
+                                                $address = $record['ip']
+                                                    ?? $record['ipv6']
+                                                    ?? null;
+
+                                                if (is_string($address)) {
+                                                    $addresses[] = $address;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    break;
+                                }
+
+                                if (!is_array($addresses)) {
+                                    break;
+                                }
+
+                                $addresses = array_values(array_unique(
+                                    $addresses,
+                                ));
+                                $isPublicAddressSet = $addresses !== [];
+
+                                foreach ($addresses as $address) {
+                                    $packedAddress = is_string($address)
+                                        ? @inet_pton($address)
+                                        : false;
+                                    $isMulticastAddress = is_string(
+                                        $packedAddress,
+                                    ) && (
+                                        (
+                                            strlen($packedAddress) === 4
+                                            && ord($packedAddress[0]) >= 224
+                                        )
+                                        || (
+                                            strlen($packedAddress) === 16
+                                            && ord($packedAddress[0]) === 255
+                                        )
+                                    );
+                                    $isSpecialTranslationAddress = is_string(
+                                        $packedAddress,
+                                    ) && strlen($packedAddress) === 16 && (
+                                        str_starts_with(
+                                            $packedAddress,
+                                            substr(
+                                                (string) inet_pton(
+                                                    '64:ff9b::',
+                                                ),
+                                                0,
+                                                12,
+                                            ),
+                                        )
+                                        || str_starts_with(
+                                            $packedAddress,
+                                            substr(
+                                                (string) inet_pton(
+                                                    '64:ff9b:1::',
+                                                ),
+                                                0,
+                                                6,
+                                            ),
+                                        )
+                                    );
+                                    $isDeprecatedRelayAddress = is_string(
+                                        $packedAddress,
+                                    ) && strlen($packedAddress) === 4
+                                        && substr($packedAddress, 0, 3)
+                                            === substr(
+                                                (string) inet_pton(
+                                                    '192.88.99.0',
+                                                ),
+                                                0,
+                                                3,
+                                            );
+
+                                    if (
+                                        !is_string($address)
+                                        || filter_var(
+                                            $address,
+                                            FILTER_VALIDATE_IP,
+                                            FILTER_FLAG_GLOBAL_RANGE,
+                                        ) === false
+                                        || $isMulticastAddress
+                                        || $isSpecialTranslationAddress
+                                        || $isDeprecatedRelayAddress
+                                    ) {
+                                        $isPublicAddressSet = false;
+                                        break;
+                                    }
+                                }
+
+                                if (!$isPublicAddressSet) {
+                                    break;
+                                }
+
+                                $remainingSeconds = $deadline
+                                    - microtime(true);
+
+                                if ($remainingSeconds <= 0) {
+                                    break;
+                                }
+
+                                $curlOptions = [
+                                    CURLOPT_PROTOCOLS => CURLPROTO_HTTP
+                                        | CURLPROTO_HTTPS,
+                                ];
+
+                                if (!$isLiteralIp) {
+                                    $resolveEntries = [];
+
+                                    foreach ($addresses as $address) {
+                                        $resolveEntries[] = sprintf(
+                                            '%s:%d:%s',
+                                            $resolvedHost,
+                                            $port,
+                                            str_contains($address, ':')
+                                                ? '[' . $address . ']'
+                                                : $address,
+                                        );
+                                    }
+
+                                    $curlOptions[CURLOPT_RESOLVE]
+                                        = $resolveEntries;
+                                }
+
+                                $response = $httpClient->request(
+                                    'GET',
+                                    $currentUri,
+                                    [
+                                        'allow_redirects' => false,
+                                        'connect_timeout' => min(
+                                            self::IMAGE_CONNECT_TIMEOUT_SECONDS,
+                                            $remainingSeconds,
+                                        ),
+                                        'timeout' => $remainingSeconds,
+                                        'http_errors' => false,
+                                        'stream' => true,
+                                        'decode_content' => false,
+                                        'proxy' => '',
+                                        'headers' => [
+                                            'Accept' => implode(
+                                                ', ',
+                                                $allowedContentTypes,
+                                            ),
+                                            'Accept-Encoding' => 'identity',
+                                        ],
+                                        'curl' => $curlOptions,
+                                    ],
+                                );
+                                $statusCode = $response->getStatusCode();
+
+                                if (
+                                    in_array(
+                                        $statusCode,
+                                        [301, 302, 303, 307, 308],
+                                        true,
+                                    )
+                                ) {
+                                    $location = trim(
+                                        $response->getHeaderLine('Location'),
+                                    );
+
+                                    if (
+                                        $location === ''
+                                        || $redirectCount
+                                            >= self::MAX_IMAGE_REDIRECTS
+                                    ) {
+                                        break;
+                                    }
+
+                                    $currentUrl = (string) UriResolver::resolve(
+                                        new Uri($currentUrl),
+                                        new Uri($location),
+                                    );
+                                    $redirectCount++;
+                                    continue;
+                                }
+
+                                if ($statusCode !== 200) {
+                                    break;
+                                }
+
+                                $contentType = strtolower(trim(explode(
+                                    ';',
+                                    $response->getHeaderLine('Content-Type'),
+                                    2,
+                                )[0]));
+
+                                if (
+                                    !in_array(
+                                        $contentType,
+                                        $allowedContentTypes,
+                                        true,
+                                    )
+                                ) {
+                                    break;
+                                }
+
+                                $maximumReadableBytes = min(
+                                    self::MAX_IMAGE_BYTES,
+                                    self::MAX_TOTAL_IMAGE_BYTES
+                                        - $totalImageBytes,
+                                );
+                                $contentLength = trim(
+                                    $response->getHeaderLine(
+                                        'Content-Length',
+                                    ),
+                                );
+
+                                if (
+                                    $maximumReadableBytes <= 0
+                                    || (
+                                        $contentLength !== ''
+                                        && (
+                                            !ctype_digit($contentLength)
+                                            || (int) $contentLength
+                                                > $maximumReadableBytes
+                                        )
+                                    )
+                                ) {
+                                    break;
+                                }
+
+                                $content = '';
+                                $responseBody = $response->getBody();
+                                $isComplete = true;
+
+                                while (!$responseBody->eof()) {
+                                    $chunk = $responseBody->read(min(
+                                        8192,
+                                        $maximumReadableBytes
+                                            - strlen($content) + 1,
+                                    ));
+
+                                    if ($chunk === '') {
+                                        $isComplete = false;
+                                        break;
+                                    }
+
+                                    $content .= $chunk;
+
+                                    if (
+                                        strlen($content)
+                                        > $maximumReadableBytes
+                                    ) {
+                                        $isComplete = false;
+                                        break;
+                                    }
+                                }
+
+                                $imageInformation = $isComplete
+                                    ? @getimagesizefromstring($content)
+                                    : false;
+                                $actualContentType = is_array(
+                                    $imageInformation,
+                                ) ? ($imageInformation['mime'] ?? null) : null;
+
+                                if ($actualContentType !== $contentType) {
+                                    break;
+                                }
+
+                                $dataUri = 'data:' . $contentType . ';base64,'
+                                    . base64_encode($content);
+                                $totalImageBytes += strlen($content);
+                                break;
+                            }
+                        } catch (Throwable) {
+                            $dataUri = null;
+                        }
+
+                        $resolvedImages[$resourceKey] = $dataUri;
+                    }
+                }
+
+                if (!is_string($dataUri)) {
+                    continue;
+                }
+
+                $originalSource = $image->getAttribute('src');
+                $image->setAttribute('src', $dataUri);
+                $convertedHtml = $document->saveHTML();
+
+                if (
+                    !is_string($convertedHtml)
+                    || strlen($convertedHtml) > self::MAX_HTML_BYTES
+                ) {
+                    $image->setAttribute('src', $originalSource);
+                    continue;
+                }
+
+                $html = $convertedHtml;
+            }
         }
 
         $options = new Options();
