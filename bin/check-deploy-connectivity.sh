@@ -2,7 +2,7 @@
 #
 # Side-effect-free post-deploy HTTP connectivity check.
 #
-# Sends an Authorization-header-less POST to the three Bearer-token-protected
+# Sends an Authorization-header-less POST to the two Bearer-token-protected
 # APIs and verifies each responds HTTP 401. This only proves routing reaches
 # each endpoint and the Bearer-token-protected endpoint rejects an
 # unauthenticated request with 401; it never sends a real Bearer Token and
@@ -27,7 +27,6 @@ fi
 ENDPOINTS=(
     "/api/mail/process"
     "/api/dating/notify"
-    "/api/overtime/notify"
 )
 
 FAILED=0
@@ -49,4 +48,4 @@ if [ "${FAILED}" -ne 0 ]; then
     exit 1
 fi
 
-echo "Unauthenticated connectivity check succeeded (3/3 returned 401)."
+echo "Unauthenticated connectivity check succeeded (2/2 returned 401)."

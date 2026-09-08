@@ -43,14 +43,13 @@ final class LegacyDataImporterTest extends TestCase
     {
         $this->connection->exec('DELETE FROM mail_api');
         $this->connection->exec('DELETE FROM dating');
-        $this->connection->exec('DELETE FROM overtime_notification_settings');
     }
 
     /**
      * The example fixtures below always contain 2 dating rows and 2
      * mail_api rows (1 enabled with a channel, 1 with a null channel).
      * The expected counts are configured to match, since the
-     * production defaults (4 / 44 / 43 / 1 / 31 / 1) are specific to
+     * production defaults (4 / 44 / 43 / 1 / 31) are specific to
      * the real legacy dataset confirmed for Issue #15.
      */
     private function createImporter(): LegacyDataImporter
@@ -62,7 +61,6 @@ final class LegacyDataImporterTest extends TestCase
             expectedMailApiEnabledCount: 2,
             expectedMailApiDisabledCount: 0,
             expectedMailApiNullChannelCount: 1,
-            expectedOvertimeCount: 1,
         );
     }
 
@@ -116,18 +114,12 @@ final class LegacyDataImporterTest extends TestCase
     }
 
     /**
-     * @return array{
-     *     dating_channel: string,
-     *     overtime_message: string,
-     *     overtime_channel: string
-     * }
+     * @return array{dating_channel: string}
      */
     private function exampleSettings(): array
     {
         return [
             'dating_channel' => 'example-legacy-channel',
-            'overtime_message' => 'Example overtime message.',
-            'overtime_channel' => 'example-legacy-channel',
         ];
     }
 
@@ -155,7 +147,7 @@ final class LegacyDataImporterTest extends TestCase
         self::assertTrue($report['can_execute']);
         self::assertTrue($report['all_tables_empty']);
         self::assertSame(
-            ['dating' => 0, 'mail_api' => 0, 'overtime_notification_settings' => 0],
+            ['dating' => 0, 'mail_api' => 0],
             $report['existing_counts'],
         );
         self::assertTrue($report['expected_counts']['dating']['matches']);
@@ -164,7 +156,6 @@ final class LegacyDataImporterTest extends TestCase
         self::assertTrue($report['expected_counts']['mail_api_enabled']['matches']);
         self::assertTrue($report['expected_counts']['mail_api_disabled']['matches']);
         self::assertTrue($report['expected_counts']['mail_api_null_channel']['matches']);
-        self::assertTrue($report['expected_counts']['overtime']['matches']);
         self::assertSame(
             0,
             (int) $this->connection
@@ -194,7 +185,6 @@ final class LegacyDataImporterTest extends TestCase
         self::assertTrue($report['executed']);
         self::assertSame(2, $report['dating_inserted']);
         self::assertSame(2, $report['mail_api_inserted']);
-        self::assertSame(1, $report['overtime_inserted']);
 
         $datingChannelIds = $this->connection
             ->query('SELECT channel_id FROM dating ORDER BY id')
@@ -267,12 +257,6 @@ final class LegacyDataImporterTest extends TestCase
             0,
             (int) $this->connection
                 ->query('SELECT COUNT(*) FROM mail_api')
-                ->fetchColumn(),
-        );
-        self::assertSame(
-            0,
-            (int) $this->connection
-                ->query('SELECT COUNT(*) FROM overtime_notification_settings')
                 ->fetchColumn(),
         );
     }
@@ -373,7 +357,6 @@ final class LegacyDataImporterTest extends TestCase
         self::assertFalse($report['executed']);
         self::assertSame(0, $report['dating_inserted']);
         self::assertSame(0, $report['mail_api_inserted']);
-        self::assertSame(0, $report['overtime_inserted']);
         self::assertSame(
             0,
             (int) $this->connection
@@ -432,7 +415,6 @@ final class LegacyDataImporterTest extends TestCase
         );
 
         self::assertNotEmpty($resolved['errors']);
-        self::assertNull($resolved['overtime']);
     }
 
     public function testChannelMapNumericValueIsRejectedWithAnError(): void
@@ -445,7 +427,6 @@ final class LegacyDataImporterTest extends TestCase
         );
 
         self::assertNotEmpty($resolved['errors']);
-        self::assertNull($resolved['overtime']);
     }
 
     public function testChannelMapEmptyStringValueIsRejectedWithAnError(): void
@@ -458,7 +439,6 @@ final class LegacyDataImporterTest extends TestCase
         );
 
         self::assertNotEmpty($resolved['errors']);
-        self::assertNull($resolved['overtime']);
     }
 
     public function testChannelMapOversizedValueIsRejectedWithAnError(): void
@@ -471,7 +451,6 @@ final class LegacyDataImporterTest extends TestCase
         );
 
         self::assertNotEmpty($resolved['errors']);
-        self::assertNull($resolved['overtime']);
     }
 
     public function testInvalidChannelMapValueDoesNotSilentlyDropMailApiRow(): void
@@ -481,8 +460,6 @@ final class LegacyDataImporterTest extends TestCase
             [$this->exampleMailApiRows()[0]],
             [
                 'dating_channel' => 'unused-channel',
-                'overtime_message' => 'Example overtime message.',
-                'overtime_channel' => 'unused-channel',
             ],
             [
                 'unused-channel' => 'C0000000000',

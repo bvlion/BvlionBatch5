@@ -53,7 +53,6 @@ $printReport = static function (array $report): void {
     );
     $lines[] = sprintf('dating_inserted: %d', $report['dating_inserted']);
     $lines[] = sprintf('mail_api_inserted: %d', $report['mail_api_inserted']);
-    $lines[] = sprintf('overtime_inserted: %d', $report['overtime_inserted']);
 
     if ($report['abort_reason'] !== null) {
         $lines[] = sprintf('abort_reason: %s', $report['abort_reason']);

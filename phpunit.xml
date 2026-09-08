@@ -26,10 +26,5 @@
             value="example_scheduler_bearer_token"
             force="true"
         />
-        <env
-            name="OVERTIME_BEARER_TOKEN"
-            value="example_overtime_bearer_token"
-            force="true"
-        />
     </php>
 </phpunit>

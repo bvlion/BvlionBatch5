@@ -41,7 +41,6 @@ cp .env.example .env
 | `IMAP_USERNAME` | IMAP接続のユーザー名 |
 | `IMAP_PASSWORD` | IMAP接続のパスワード |
 | `SCHEDULER_BEARER_TOKEN` | メール処理・記念日通知用Bearer Token |
-| `OVERTIME_BEARER_TOKEN` | 定型Slack通知用Bearer Token |
 
 `SLACK_TEST_CHANNEL_ID`を除く環境変数は、アプリ本体の動作に必須です。本番値は`.env`または実行環境の環境変数で注入し、コミットしません。設定が未指定または空の場合は、秘密値を含めず、該当する環境変数名を示してリクエスト処理を失敗させます。`SLACK_TEST_CHANNEL_ID`はアプリ本体では使用せず、後述の「実チャンネルへの疎通確認」でのみ使用します。
 
@@ -66,7 +65,7 @@ docker compose run --rm app composer migrate
 
 ## Slack App設定
 
-BvlionBatch5専用のSlack App・Botを1つだけ使用します。mail・dating・overtimeの3機能は、すべて同一の`SLACK_BOT_TOKEN`で投稿します。機能ごとに別のApp・Bot・Tokenは作成しません。
+BvlionBatch5専用のSlack App・Botを1つだけ使用します。mail・datingの2機能は、同一の`SLACK_BOT_TOKEN`で投稿します。機能ごとに別のApp・Bot・Tokenは作成しません。
 
 本番Slack Appは、次の手順で設定します。
 
@@ -79,7 +78,7 @@ BvlionBatch5専用のSlack App・Botを1つだけ使用します。mail・dating
 
 通常投稿にはSlack Web APIの[`chat.postMessage`](https://docs.slack.dev/reference/methods/chat.postMessage)を、HTMLメールのPDF投稿には[`files.getUploadURLExternal`](https://docs.slack.dev/reference/methods/files.getUploadURLExternal)・[`files.completeUploadExternal`](https://docs.slack.dev/reference/methods/files.completeUploadExternal)を使用します。
 
-- dating・overtimeは、`channel`と`text`だけを指定する通常投稿です。表示名・アイコンはリクエストで上書きせず、Botそのものの表示名・アイコンで投稿されます。
+- datingは、`channel`と`text`だけを指定する通常投稿です。表示名・アイコンはリクエストで上書きせず、Botそのものの表示名・アイコンで投稿されます。
 - mailのプレーンテキスト投稿は、`channel`・`text`に加えて`username`・`icon_url`を指定するカスタム投稿です。旧BvlionBatch4のメール転送元表示(送信元ごとの表示名・アイコン)を復元するため、`chat:write.customize`スコープを使ってメールルールごとに投稿の表示名とアイコンを上書きします。このカスタム表示は、家族内で利用する閉じたワークスペースにおけるメール転送元の識別が目的であり、人間へのなりすましを意図したものではありません。
 - mailのPDF投稿(HTML本文を持つメール)も、同じ`channel_id`・`username`・`icon_url`を`files.completeUploadExternal`へ指定し、プレーンテキスト投稿と同じ表示名・アイコンでファイルを共有します。詳細は[メール処理API](#メール処理api)を参照してください。
 
@@ -89,7 +88,7 @@ Bot Tokenが漏洩した、または漏洩した疑いがある場合は、次�
 
 1. Slack Appの管理画面で、BvlionBatch5用Bot Tokenを失効させます。
 2. BvlionBatch5用Slack Appを再認可し、新しいBot Tokenを発行します。
-3. 本番環境の`SLACK_BOT_TOKEN`を新しいTokenへ差し替えます(mail・dating・overtimeの3機能は同じ環境変数を参照しているため、差し替えは1箇所で完了します)。
+3. 本番環境の`SLACK_BOT_TOKEN`を新しいTokenへ差し替えます(mail・datingの2機能は同じ環境変数を参照しているため、差し替えは1箇所で完了します)。
 4. 通知先とする各チャンネルへ、BvlionBatch5用Slack App・Botが参加した状態のままであることを確認します(`chat:write.public`を使わない構成のため、参加していないチャンネルには投稿できません)。
 5. `bin/check-slack.php`でSlackへの疎通を確認します(「実チャンネルへの疎通確認」節を参照)。
 
@@ -134,33 +133,8 @@ docker compose run --rm --no-deps app php bin/check-slack.php
 | --- | --- |
 | `POST /api/mail/process` | `SCHEDULER_BEARER_TOKEN` |
 | `POST /api/dating/notify` | `SCHEDULER_BEARER_TOKEN` |
-| `POST /api/overtime/notify` | `OVERTIME_BEARER_TOKEN` |
 
 各ルートの実装時に`BearerTokenMiddleware`をルートミドルウェアとして登録し、`Authorization: Bearer <token>`ヘッダーを検証します。ヘッダーが未指定、形式不正、またはトークンが一致しない場合は、トークン値をレスポンスへ含めずHTTP 401を返します。
-
-## 残業通知
-
-`overtime_notification_settings`テーブルの`id = 1`で、通知文面と投稿先SlackチャンネルIDを管理します。マイグレーションには本番値を含めません。
-
-| 列 | 用途 |
-| --- | --- |
-| `message` | 通知文面 |
-| `channel_id` | 投稿先のSlackチャンネルID |
-
-HTTP Shortcutsから`POST /api/overtime/notify`を呼び出し、`Authorization: Bearer <OVERTIME_BEARER_TOKEN>`ヘッダーを設定します。リクエスト本文は使用せず、通知文面を外部から指定できません。
-
-旧HomeServerのIncoming Webhookは再利用しません。旧WebhookをSlackの管理画面で失効させ、現在のSlack Appと`SLACK_BOT_TOKEN`を使用します。
-
-成功時はHTTP 200で次のJSONを返します。
-
-```json
-{
-  "message": "Overtime notification sent.",
-  "timestamp": "1234567890.123456"
-}
-```
-
-設定がない場合はHTTP 500、Slack投稿に失敗した場合はHTTP 502で、秘密値を含まないJSONエラーを返します。
 
 ## メール検索
 
@@ -501,9 +475,9 @@ API疎通確認の前に、Slack・IMAPそれぞれの外部サービスへの�
 
 #### 1. 未認証確認
 
-3つのAPIすべてが、Authorizationヘッダーなしで401を返すことを確認します。これで確認できるのは、ルーティングとBearer Token認証による拒否が機能していることです。`Authorization`ヘッダーが`.htaccess`のRewriteによってPHPまで到達しているかどうかは、この時点では確認できません(ヘッダーがまったく転送されていなくても、未指定の場合と同じ401になるためです)。ヘッダー転送の確認は、後述の「認証済み確認」で正しいBearer Tokenを使ったリクエストが成功することによって行います。
+2つのAPIすべてが、Authorizationヘッダーなしで401を返すことを確認します。これで確認できるのは、ルーティングとBearer Token認証による拒否が機能していることです。`Authorization`ヘッダーが`.htaccess`のRewriteによってPHPまで到達しているかどうかは、この時点では確認できません(ヘッダーがまったく転送されていなくても、未指定の場合と同じ401になるためです)。ヘッダー転送の確認は、後述の「認証済み確認」で正しいBearer Tokenを使ったリクエストが成功することによって行います。
 
-`v*`タグによる自動デプロイでは、デプロイ完了後にこの確認を`bin/check-deploy-connectivity.sh`が自動実行し、3件のいずれかが401以外の場合はGitHub Actions全体を失敗させます。このスクリプトはBearer Tokenを一切使用せず、Slack投稿・IMAP処理・DB更新などの副作用も発生させません。GitHub Actions専用ではなく、ローカルやSSH先から手動実行する場合にも同じスクリプトを再利用できます。
+`v*`タグによる自動デプロイでは、デプロイ完了後にこの確認を`bin/check-deploy-connectivity.sh`が自動実行し、2件のいずれかが401以外の場合はGitHub Actions全体を失敗させます。このスクリプトはBearer Tokenを一切使用せず、Slack投稿・IMAP処理・DB更新などの副作用も発生させません。GitHub Actions専用ではなく、ローカルやSSH先から手動実行する場合にも同じスクリプトを再利用できます。
 
 ```shell
 bin/check-deploy-connectivity.sh https://<domain>
@@ -511,12 +485,11 @@ bin/check-deploy-connectivity.sh https://<domain>
 DEPLOY_BASE_URL=https://<domain> bin/check-deploy-connectivity.sh
 ```
 
-内部では次と同等のcurlリクエストを送り、3件とも`HTTP 401`であることを確認します(いずれか1件でも401以外なら非ゼロ終了します)。
+内部では次と同等のcurlリクエストを送り、2件とも`HTTP 401`であることを確認します(いずれか1件でも401以外なら非ゼロ終了します)。
 
 ```shell
 curl -i -X POST https://<domain>/api/mail/process
 curl -i -X POST https://<domain>/api/dating/notify
-curl -i -X POST https://<domain>/api/overtime/notify
 ```
 
 #### 2. 認証済み確認
@@ -540,24 +513,6 @@ curl -i -X POST https://<domain>/api/overtime/notify
     ```
 
     `{"success":true,"failure_count":0}`とHTTP 200を確認します。
-
-- **残業通知**: 本番用の設定(`overtime_notification_settings`の`id = 1`)をテスト値で一時的に上書きすることはしません。次の段階で確認します。
-
-    - 設定が未登録の状態(初回デプロイ直後など)で実行すると、Slack投稿を発生させずにHTTP 500(`Overtime notification configuration is missing.`)が返ります。これによりBearer認証、ルーティング、データベース接続までを確認できます。
-
-        ```shell
-        curl -i -X POST https://<domain>/api/overtime/notify \
-          -H "Authorization: Bearer <OVERTIME_BEARER_TOKEN>"
-        ```
-
-    - Slackへの接続と投稿そのものは、`bin/check-slack.php`で確認します。このコマンドはテスト用チャンネル(`SLACK_TEST_CHANNEL_ID`)へテストメッセージを1件投稿します(詳細は「Slack App設定」節を参照)。
-
-        ```shell
-        /opt/php-8.5.5/bin/php bin/check-slack.php
-        ```
-
-    - `POST /api/overtime/notify`をSlack投稿まで含めて確認するのは、本番用の文面・チャンネルIDを`overtime_notification_settings`へ正式に登録した後に行ってください。本番設定をテスト値で上書きする確認方法は採用しません。
-    - 本番設定を登録した後にこのAPIを実行すると、設定済みの本番チャンネルへ実際の通知が1件投稿されます。**実行前に必ず承認を得てから行ってください。**
 
 ## 開発運用
 
