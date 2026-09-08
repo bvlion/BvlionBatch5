@@ -152,7 +152,10 @@ final class MailProcessingService
         );
 
         if ($content['html_body'] !== '') {
-            $pdf = $this->htmlToPdfConverter->convert($content['html_body']);
+            $pdf = $this->htmlToPdfConverter->convert(
+                $content['html_body'],
+                $content['inline_images'] ?? [],
+            );
 
             return $this->slackClient->postPdfFile(
                 $rule['channel_id'],

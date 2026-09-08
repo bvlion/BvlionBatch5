@@ -216,7 +216,9 @@ docker compose run --rm --no-deps app php bin/check-imap.php
 
 PDF化・PDF投稿の詳細は次のとおりです。
 
-- Dompdfはリモート画像・外部CSS・Webフォントの取得を無効化(`isRemoteEnabled = false`)し、JavaScriptも実行しません(`isJavascriptEnabled = false`)。メール本文の外部URLへBvlionBatch5側からアクセスすることはありません。
+- Dompdfはリモート画像・外部CSS・Webフォントの取得を無効化(`isRemoteEnabled = false`)し、JavaScriptも実行しません(`isJavascriptEnabled = false`)。HTML内の`cid:`画像は対応するinline MIMEパートから、`http` / `https`画像はBvlionBatch5側で取得してdata URIへ置換してからDompdfへ渡します。それ以外のスキームは取得しません。
+- 外部画像の取得前には名前解決結果がすべて公開IPアドレスであることを確認し、検証済みIPアドレスへ接続先を固定します。localhost、プライベートIP、リンクローカル、予約済みIPへのアクセスは拒否し、最大3回のリダイレクト先にも同じ検証を行います。接続タイムアウトは3秒、リダイレクトを含む1画像全体のタイムアウトは10秒です。取得対象は実データも画像と判定できる`image/gif`、`image/jpeg`、`image/png`、`image/webp`に限定し、1画像2,000,000バイト、メール全体4,000,000バイトを上限とします。取得または検証に失敗した画像は置換せず、本文のPDF化を継続します。
+- PDF内へ画像を描画するため、PHPのGD拡張を必須とします。
 - 日本語本文を表示するため、`resources/fonts/IPAexGothic`に同梱したIPAexゴシック(TrueType、IPAフォントライセンスv1.0)をDompdfへ登録します。XServerにインストール済みのフォントには依存しません。CFFアウトラインを持つOpenType(`.otf`)フォントはDompdfでの埋め込みが不安定なため使用せず、TrueType(`.ttf`)フォントのみを同梱しています。
 - Dompdfはブラウザと異なり、指定フォントにグリフがない場合の自動フォールバックを行わないため、メール本文のHTML/CSSがどのような`font-family`を指定していても(`!important`や高い詳細度を伴う場合を含む)、必ずIPAexゴシックが選択されるようにしています。CSSへ上書きルールを注入して詳細度・`!important`で競う方式ではなく、Dompdf自身が解決しうる全フォント名(`sans-serif`・`serif`・`helvetica`・`times`等、`vendor/dompdf/dompdf/lib/fonts/installed-fonts.dist.json`が持つ既定の全ファミリー名)をIPAexゴシックへ登録し直すことで、メール側がどの名前を指定してもDompdfの解決結果がIPAexゴシック以外になり得ないようにしています。それ以外の未知のフォント名は、Dompdfの既定フォールバック(`Options::setDefaultFont()`、これもIPAexゴシックに設定)へ渡ります。
 - HTML本文・生成したPDFはメモリ上でのみ扱い、ディスクへの一時ファイル書き出しやログ出力、永続保存を行いません。

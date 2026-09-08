@@ -221,6 +221,10 @@ class ImapMailbox
      *     subject: string,
      *     body: string,
      *     html_body: string,
+     *     inline_images: array<
+     *         string,
+     *         array{content_type: string, content: string}
+     *     >,
      *     received_at: DateTimeImmutable|null
      * }
      */
@@ -260,16 +264,21 @@ class ImapMailbox
             $section,
             FT_UID | FT_PEEK,
         );
+        $body = $decoder->decodeBody($structure, $bodyFetcher);
+        $inlineImages = [];
+        $htmlBody = $decoder->decodeHtmlBody(
+            $structure,
+            $bodyFetcher,
+            $inlineImages,
+        );
 
         return [
             'subject' => $decoder->decodeSubject(
                 (string) ($overview[0]->subject ?? ''),
             ),
-            'body' => $decoder->decodeBody($structure, $bodyFetcher),
-            'html_body' => $decoder->decodeHtmlBody(
-                $structure,
-                $bodyFetcher,
-            ),
+            'body' => $body,
+            'html_body' => $htmlBody,
+            'inline_images' => $inlineImages,
             'received_at' => $this->extractReceivedAt($overview[0]),
         ];
     }
