@@ -345,6 +345,83 @@ final class HtmlToPdfConverterTest extends TestCase
         self::assertStringNotContainsString('/Subtype /Image', $pdf);
     }
 
+    public function testLogsMailContextAndExternalImageProcessing(): void
+    {
+        $logPath = tempnam(sys_get_temp_dir(), 'bvlion-image-log-test-');
+        self::assertIsString($logPath);
+        $previousErrorLog = ini_get('error_log');
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
+
+        try {
+            ini_set('error_log', $logPath);
+
+            (new HtmlToPdfConverter())->convert(
+                '<html><body><img src="cid:logo%40example.test">'
+                    . '<img src="https://images.example.test/logo.png">'
+                    . '<p>Example body.</p></body></html>',
+                [
+                    'logo@example.test' => [
+                        'content_type' => 'image/png',
+                        'content' => $imageContent,
+                    ],
+                ],
+                new Client([
+                    'handler' => new MockHandler([
+                        new Response(
+                            302,
+                            ['Location' => 'https://cdn.example.test/logo.png'],
+                        ),
+                        new Response(503, ['Content-Type' => 'text/html']),
+                    ]),
+                ]),
+                static fn (string $host): array => $host === 'images.example.test'
+                    ? ['93.184.216.34']
+                    : ['93.184.216.35'],
+                [
+                    'mail_uid' => 123,
+                    'subject' => 'Example subject.',
+                    'received_at' => '2026-09-15T12:00:00+09:00',
+                ],
+            );
+
+            $logContent = file_get_contents($logPath);
+            self::assertIsString($logContent);
+            self::assertStringContainsString('"mail_uid":123', $logContent);
+            self::assertStringContainsString(
+                '"subject":"Example subject."',
+                $logContent,
+            );
+            self::assertStringContainsString(
+                '"content_id":"logo@example.test"',
+                $logContent,
+            );
+            self::assertStringContainsString('"result":"embedded"', $logContent);
+            self::assertStringContainsString(
+                '"status":302',
+                $logContent,
+            );
+            self::assertStringContainsString(
+                '"redirect_url":"https://cdn.example.test/logo.png"',
+                $logContent,
+            );
+            self::assertStringContainsString('"status":503', $logContent);
+            self::assertStringContainsString(
+                '"failure_reason":"http_status"',
+                $logContent,
+            );
+        } finally {
+            ini_set('error_log', is_string($previousErrorLog)
+                ? $previousErrorLog
+                : '');
+            @unlink($logPath);
+        }
+    }
+
     public function testRejectsOversizedImageFromContentLength(): void
     {
         $pdf = (new HtmlToPdfConverter())->convert(
