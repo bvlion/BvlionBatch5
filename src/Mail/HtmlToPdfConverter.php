@@ -206,6 +206,7 @@ final class HtmlToPdfConverter
                 }
 
                 $dataUri = null;
+                $imageLogEntry = null;
                 $resourceKey = $source;
                 $lowerSource = strtolower($source);
 
@@ -218,7 +219,7 @@ final class HtmlToPdfConverter
 
                     if (array_key_exists($resourceKey, $resolvedImages)) {
                         $dataUri = $resolvedImages[$resourceKey];
-                        $writeLog([
+                        $imageLogEntry = [
                             'event' => 'pdf_image_processed',
                             'image_index' => $imageIndex,
                             'src' => $source,
@@ -226,7 +227,7 @@ final class HtmlToPdfConverter
                             'result' => is_string($dataUri)
                                 ? 'embedded_from_cache'
                                 : 'failed_from_cache',
-                        ]);
+                        ];
                     } else {
                         $inlineImage = $inlineImages[$contentId] ?? null;
                         $contentType = is_array($inlineImage)
@@ -287,7 +288,7 @@ final class HtmlToPdfConverter
                             }
                         }
 
-                        $writeLog([
+                        $imageLogEntry = [
                             'event' => 'pdf_image_processed',
                             'image_index' => $imageIndex,
                             'src' => $source,
@@ -300,7 +301,7 @@ final class HtmlToPdfConverter
                                 ? 'embedded'
                                 : 'failed',
                             'failure_reason' => $failureReason,
-                        ]);
+                        ];
                     }
                 } elseif (
                     str_starts_with($lowerSource, 'http://')
@@ -308,7 +309,7 @@ final class HtmlToPdfConverter
                 ) {
                     if (array_key_exists($resourceKey, $resolvedImages)) {
                         $dataUri = $resolvedImages[$resourceKey];
-                        $writeLog([
+                        $imageLogEntry = [
                             'event' => 'pdf_image_processed',
                             'image_index' => $imageIndex,
                             'src' => $source,
@@ -316,7 +317,7 @@ final class HtmlToPdfConverter
                             'result' => is_string($dataUri)
                                 ? 'embedded_from_cache'
                                 : 'failed_from_cache',
-                        ]);
+                        ];
                     } else {
                         $currentUrl = $source;
                         $deadline = microtime(true)
@@ -324,6 +325,9 @@ final class HtmlToPdfConverter
                         $redirectCount = 0;
                         $failureReason = null;
                         $exception = null;
+                        $addresses = [];
+                        $actualContentType = null;
+                        $fetchedBytes = null;
                         $httpClient ??= new Client();
 
                         try {
@@ -679,6 +683,7 @@ final class HtmlToPdfConverter
                                 $actualContentType = is_array(
                                     $imageInformation,
                                 ) ? ($imageInformation['mime'] ?? null) : null;
+                                $fetchedBytes = strlen($content);
 
                                 if ($actualContentType !== $contentType) {
                                     $failureReason = $isComplete
@@ -699,12 +704,15 @@ final class HtmlToPdfConverter
                         }
 
                         $resolvedImages[$resourceKey] = $dataUri;
-                        $writeLog([
+                        $imageLogEntry = [
                             'event' => 'pdf_image_processed',
                             'image_index' => $imageIndex,
                             'src' => $source,
                             'source_type' => 'http',
                             'request_url' => $currentUrl,
+                            'resolved_ips' => $addresses,
+                            'actual_content_type' => $actualContentType,
+                            'bytes' => $fetchedBytes,
                             'result' => is_string($dataUri)
                                 ? 'embedded'
                                 : 'failed',
@@ -713,7 +721,7 @@ final class HtmlToPdfConverter
                                 ? $exception::class
                                 : null,
                             'exception_message' => $exception?->getMessage(),
-                        ]);
+                        ];
                     }
                 } else {
                     $isDataUri = str_starts_with($lowerSource, 'data:');
@@ -728,6 +736,10 @@ final class HtmlToPdfConverter
                 }
 
                 if (!is_string($dataUri)) {
+                    if (is_array($imageLogEntry)) {
+                        $writeLog($imageLogEntry);
+                    }
+
                     continue;
                 }
 
@@ -740,17 +752,20 @@ final class HtmlToPdfConverter
                     || strlen($convertedHtml) > self::MAX_HTML_BYTES
                 ) {
                     $image->setAttribute('src', $originalSource);
-                    $writeLog([
-                        'event' => 'pdf_image_processed',
-                        'image_index' => $imageIndex,
-                        'src' => $source,
-                        'result' => 'failed',
-                        'failure_reason' => 'data_uri_html_size_limit',
-                    ]);
+                    if (is_array($imageLogEntry)) {
+                        $imageLogEntry['result'] = 'failed';
+                        $imageLogEntry['failure_reason'] = 'data_uri_html_size_limit';
+                        $writeLog($imageLogEntry);
+                    }
+
                     continue;
                 }
 
                 $html = $convertedHtml;
+
+                if (is_array($imageLogEntry)) {
+                    $writeLog($imageLogEntry);
+                }
             }
         }
 
