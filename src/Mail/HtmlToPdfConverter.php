@@ -328,6 +328,9 @@ final class HtmlToPdfConverter
                         $addresses = [];
                         $actualContentType = null;
                         $fetchedBytes = null;
+                        $maximumReadableBytes = 0;
+                        $receivedBytes = 0;
+                        $isSizeLimitExceeded = false;
                         $httpClient ??= new Client();
 
                         try {
@@ -495,6 +498,17 @@ final class HtmlToPdfConverter
                                     break;
                                 }
 
+                                $maximumReadableBytes = min(
+                                    self::MAX_IMAGE_BYTES,
+                                    self::MAX_TOTAL_IMAGE_BYTES
+                                        - $totalImageBytes,
+                                );
+
+                                if ($maximumReadableBytes <= 0) {
+                                    $failureReason = 'total_image_size_limit';
+                                    break;
+                                }
+
                                 $curlOptions = [
                                     CURLOPT_PROTOCOLS => CURLPROTO_HTTP
                                         | CURLPROTO_HTTPS,
@@ -531,6 +545,24 @@ final class HtmlToPdfConverter
                                         'http_errors' => false,
                                         'decode_content' => false,
                                         'proxy' => '',
+                                        'progress' => static function (
+                                            $downloadTotal,
+                                            $downloaded,
+                                        ) use (
+                                            &$receivedBytes,
+                                            &$isSizeLimitExceeded,
+                                            $maximumReadableBytes,
+                                        ): bool {
+                                            $receivedBytes = $downloaded;
+
+                                            if ($downloaded > $maximumReadableBytes) {
+                                                $isSizeLimitExceeded = true;
+
+                                                return true;
+                                            }
+
+                                            return false;
+                                        },
                                         'headers' => [
                                             'Accept' => implode(
                                                 ', ',
@@ -560,6 +592,15 @@ final class HtmlToPdfConverter
                                     'response_content_type' => $responseContentType,
                                     'response_content_length' => $responseContentLength,
                                 ]);
+
+                                if ($isSizeLimitExceeded) {
+                                    $failureReason = $maximumReadableBytes
+                                        < self::MAX_IMAGE_BYTES
+                                        ? 'total_image_size_limit'
+                                        : 'image_size_limit';
+                                    $fetchedBytes = $receivedBytes;
+                                    break;
+                                }
 
                                 if (
                                     in_array(
@@ -621,11 +662,6 @@ final class HtmlToPdfConverter
                                     break;
                                 }
 
-                                $maximumReadableBytes = min(
-                                    self::MAX_IMAGE_BYTES,
-                                    self::MAX_TOTAL_IMAGE_BYTES
-                                        - $totalImageBytes,
-                                );
                                 $contentLength = trim(
                                     $response->getHeaderLine(
                                         'Content-Length',
@@ -633,19 +669,14 @@ final class HtmlToPdfConverter
                                 );
 
                                 if (
-                                    $maximumReadableBytes <= 0
-                                    || (
-                                        $contentLength !== ''
-                                        && (
-                                            !ctype_digit($contentLength)
-                                            || (int) $contentLength
-                                                > $maximumReadableBytes
-                                        )
+                                    $contentLength !== ''
+                                    && (
+                                        !ctype_digit($contentLength)
+                                        || (int) $contentLength
+                                            > $maximumReadableBytes
                                     )
                                 ) {
-                                    $failureReason = $maximumReadableBytes <= 0
-                                        ? 'total_image_size_limit'
-                                        : 'image_size_limit';
+                                    $failureReason = 'image_size_limit';
                                     break;
                                 }
 
@@ -698,7 +729,14 @@ final class HtmlToPdfConverter
                             }
                         } catch (Throwable $throwable) {
                             $dataUri = null;
-                            $failureReason = 'exception';
+                            $failureReason = $isSizeLimitExceeded
+                                ? ($maximumReadableBytes < self::MAX_IMAGE_BYTES
+                                    ? 'total_image_size_limit'
+                                    : 'image_size_limit')
+                                : 'exception';
+                            $fetchedBytes = $isSizeLimitExceeded
+                                ? $receivedBytes
+                                : null;
                             $exception = $throwable;
                         }
 
@@ -737,17 +775,23 @@ final class HtmlToPdfConverter
                 if (!is_string($dataUri)) {
                     if (is_array($imageLogEntry)) {
                         $writeLog($imageLogEntry);
-                    }
 
-                    $alternativeText = $image->getAttribute('alt');
+                        $alternativeText = $image->getAttribute('alt');
 
-                    if ($alternativeText !== '') {
-                        $image->parentNode?->replaceChild(
-                            $document->createTextNode($alternativeText),
-                            $image,
-                        );
-                    } else {
-                        $image->parentNode?->removeChild($image);
+                        if ($alternativeText !== '') {
+                            $image->parentNode?->replaceChild(
+                                $document->createTextNode($alternativeText),
+                                $image,
+                            );
+                        } else {
+                            $image->parentNode?->removeChild($image);
+                        }
+
+                        $convertedHtml = $document->saveHTML();
+
+                        if (is_string($convertedHtml)) {
+                            $html = $convertedHtml;
+                        }
                     }
 
                     continue;
@@ -777,6 +821,12 @@ final class HtmlToPdfConverter
                         );
                     } else {
                         $image->parentNode?->removeChild($image);
+                    }
+
+                    $convertedHtml = $document->saveHTML();
+
+                    if (is_string($convertedHtml)) {
+                        $html = $convertedHtml;
                     }
 
                     continue;

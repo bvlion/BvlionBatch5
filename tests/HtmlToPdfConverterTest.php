@@ -306,6 +306,132 @@ final class HtmlToPdfConverterTest extends TestCase
         self::assertStringContainsString('/Subtype /Image', $pdf);
     }
 
+    public function testRejectsImageWhenContentLengthIsMissingOrUnderstated(): void
+    {
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
+        $requestOptions = [];
+        $responseIndex = 0;
+
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+                . '<img src="https://images.example.test/missing-length.png">'
+                . '<img src="https://images.example.test/short-length.png">'
+                . '</body></html>',
+            [],
+            new Client([
+                'handler' => static function (
+                    mixed $request,
+                    array $options,
+                ) use (
+                    &$requestOptions,
+                    &$responseIndex,
+                    $imageContent
+                ) {
+                    $requestOptions[] = $options;
+                    $responseIndex++;
+                    $progress = $options['progress'] ?? null;
+
+                    if (is_callable($progress)) {
+                        $progress(
+                            0,
+                            HtmlToPdfConverter::MAX_IMAGE_BYTES + 1,
+                        );
+                    }
+
+                    return Create::promiseFor(new Response(
+                        200,
+                        $responseIndex === 1
+                            ? ['Content-Type' => 'image/png']
+                            : [
+                                'Content-Type' => 'image/png',
+                                'Content-Length' => '1',
+                            ],
+                        $imageContent,
+                    ));
+                },
+            ]),
+            static fn (string $host): array => ['93.184.216.34'],
+        );
+
+        self::assertCount(2, $requestOptions);
+
+        foreach ($requestOptions as $options) {
+            self::assertArrayHasKey('progress', $options);
+        }
+
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertStringNotContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testRejectsImageWhenTotalImageSizeLimitIsExceededDuringDownload(): void
+    {
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
+        $inlineImageContent = $imageContent . str_repeat(
+            "\0",
+            1_500_000 - strlen($imageContent),
+        );
+        $requestOptions = [];
+
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body><img src="cid:first%40example.test">'
+                . '<img src="cid:second%40example.test">'
+                . '<img src="https://images.example.test/third.png">'
+                . '</body></html>',
+            [
+                'first@example.test' => [
+                    'content_type' => 'image/png',
+                    'content' => $inlineImageContent,
+                ],
+                'second@example.test' => [
+                    'content_type' => 'image/png',
+                    'content' => $inlineImageContent,
+                ],
+            ],
+            new Client([
+                'handler' => static function (
+                    mixed $request,
+                    array $options,
+                ) use (
+                    &$requestOptions,
+                    $imageContent
+                ) {
+                    $requestOptions = $options;
+                    $progress = $options['progress'] ?? null;
+                    $remainingImageBytes = HtmlToPdfConverter::MAX_TOTAL_IMAGE_BYTES
+                        - 3_000_000;
+
+                    if (is_callable($progress)) {
+                        self::assertFalse($progress(0, $remainingImageBytes));
+                        self::assertTrue($progress(0, $remainingImageBytes + 1));
+                    }
+
+                    return Create::promiseFor(new Response(
+                        200,
+                        [
+                            'Content-Type' => 'image/png',
+                            'Content-Length' => '1',
+                        ],
+                        $imageContent,
+                    ));
+                },
+            ]),
+            static fn (string $host): array => ['93.184.216.34'],
+        );
+
+        self::assertArrayHasKey('progress', $requestOptions);
+        self::assertStringStartsWith('%PDF-', $pdf);
+    }
+
     public function testRejectsPrivateAddressWithoutHttpRequest(): void
     {
         $requestHistory = [];
@@ -392,6 +518,86 @@ final class HtmlToPdfConverterTest extends TestCase
 
         self::assertStringStartsWith('%PDF-', $pdf);
         self::assertStringNotContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testFailedImageAlternativeTextIsIncludedWithoutLaterSuccess(): void
+    {
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+                . '<img src="https://images.example.test/missing.png" '
+                . 'alt="Unavailable image">'
+                . '</body></html>',
+            [],
+            new Client([
+                'handler' => new MockHandler([
+                    new Response(503, ['Content-Type' => 'image/png']),
+                ]),
+            ]),
+            static fn (string $host): array => ['93.184.216.34'],
+        );
+
+        self::assertStringStartsWith('%PDF-', $pdf);
+        preg_match_all(
+            '/\/Filter \/FlateDecode.*?stream\r?\n(.*?)\r?\nendstream/s',
+            $pdf,
+            $compressedStreams,
+        );
+        $decodedStreams = '';
+
+        foreach ($compressedStreams[1] as $compressedStream) {
+            $decodedStream = gzuncompress($compressedStream);
+
+            if (is_string($decodedStream)) {
+                $decodedStreams .= $decodedStream;
+            }
+        }
+
+        self::assertStringContainsString(
+            mb_convert_encoding('Unavailable image', 'UTF-16BE', 'UTF-8'),
+            $decodedStreams,
+        );
+    }
+
+    public function testPreservesDataUriImageWhenHttpImageFailsBeforeLaterSuccess(): void
+    {
+        $pngImageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        $gifImageContent = base64_decode(
+            'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+            true,
+        );
+        self::assertIsString($pngImageContent);
+        self::assertIsString($gifImageContent);
+
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+                . '<img src="data:image/gif;base64,'
+                . base64_encode($gifImageContent) . '">'
+                . '<img src="https://images.example.test/missing.png">'
+                . '<img src="https://images.example.test/success.png">'
+                . '</body></html>',
+            [],
+            new Client([
+                'handler' => new MockHandler([
+                    new Response(503, ['Content-Type' => 'image/png']),
+                    new Response(
+                        200,
+                        ['Content-Type' => 'image/png'],
+                        $pngImageContent,
+                    ),
+                ]),
+            ]),
+            static fn (string $host): array => ['93.184.216.34'],
+        );
+
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertGreaterThanOrEqual(
+            2,
+            substr_count($pdf, '/Subtype /Image'),
+        );
     }
 
     public function testLogsMailContextAndExternalImageProcessing(): void
