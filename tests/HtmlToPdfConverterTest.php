@@ -7,9 +7,11 @@ namespace BvlionBatch5\Tests;
 use BvlionBatch5\Mail\HtmlToPdfConverter;
 use FontLib\Font;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\InvalidArgumentException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
+use GuzzleHttp\Promise\Create;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -253,6 +255,53 @@ final class HtmlToPdfConverterTest extends TestCase
             CURLOPT_RESOLVE,
             $requestHistory[0]['options']['curl'],
         );
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertStringContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testFetchesImageWithCurlResolveWithoutUsingStreamHandler(): void
+    {
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
+
+        $pdf = (new HtmlToPdfConverter())->convert(
+            '<html><body>'
+                . '<img src="https://images.example.test/logo.png">'
+                . '<p>Example body.</p></body></html>',
+            [],
+            new Client([
+                'handler' => static function (
+                    mixed $request,
+                    array $options,
+                ) use ($imageContent) {
+                    if (
+                        ($options['stream'] ?? false)
+                        && array_key_exists('curl', $options)
+                    ) {
+                        throw new InvalidArgumentException(
+                            'Passing the "curl" request option to the stream '
+                                . 'handler is not supported because the stream '
+                                . 'handler ignores cURL options.',
+                        );
+                    }
+
+                    self::assertArrayNotHasKey('stream', $options);
+                    self::assertArrayHasKey(CURLOPT_RESOLVE, $options['curl']);
+
+                    return Create::promiseFor(new Response(
+                        200,
+                        ['Content-Type' => 'image/png'],
+                        $imageContent,
+                    ));
+                },
+            ]),
+            static fn (string $host): array => ['93.184.216.34'],
+        );
+
         self::assertStringStartsWith('%PDF-', $pdf);
         self::assertStringContainsString('/Subtype /Image', $pdf);
     }

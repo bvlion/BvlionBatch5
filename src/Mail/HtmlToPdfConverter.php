@@ -184,7 +184,7 @@ final class HtmlToPdfConverter
             $totalImageBytes = 0;
             $imageIndex = 0;
 
-            foreach ($document->getElementsByTagName('img') as $image) {
+            foreach (iterator_to_array($document->getElementsByTagName('img')) as $image) {
                 if (!$image instanceof DOMElement) {
                     continue;
                 }
@@ -529,7 +529,6 @@ final class HtmlToPdfConverter
                                         ),
                                         'timeout' => $remainingSeconds,
                                         'http_errors' => false,
-                                        'stream' => true,
                                         'decode_content' => false,
                                         'proxy' => '',
                                         'headers' => [
@@ -740,6 +739,17 @@ final class HtmlToPdfConverter
                         $writeLog($imageLogEntry);
                     }
 
+                    $alternativeText = $image->getAttribute('alt');
+
+                    if ($alternativeText !== '') {
+                        $image->parentNode?->replaceChild(
+                            $document->createTextNode($alternativeText),
+                            $image,
+                        );
+                    } else {
+                        $image->parentNode?->removeChild($image);
+                    }
+
                     continue;
                 }
 
@@ -756,6 +766,17 @@ final class HtmlToPdfConverter
                         $imageLogEntry['result'] = 'failed';
                         $imageLogEntry['failure_reason'] = 'data_uri_html_size_limit';
                         $writeLog($imageLogEntry);
+                    }
+
+                    $alternativeText = $image->getAttribute('alt');
+
+                    if ($alternativeText !== '') {
+                        $image->parentNode?->replaceChild(
+                            $document->createTextNode($alternativeText),
+                            $image,
+                        );
+                    } else {
+                        $image->parentNode?->removeChild($image);
                     }
 
                     continue;
