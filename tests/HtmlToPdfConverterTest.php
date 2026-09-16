@@ -28,6 +28,25 @@ final class HtmlToPdfConverterTest extends TestCase
         self::assertStringStartsWith('%PDF-', $pdf);
     }
 
+    public function testConvertsNestedTableCellContentAcrossPages(): void
+    {
+        $paragraph = '<p>Example body content that must remain within the '
+            . 'visible PDF page area.</p>';
+        $html = '<html><body><p>Example preheader.</p>'
+            . '<table width="1200"><tr><td><table><tr><td>'
+            . '<table><tr><td>' . str_repeat($paragraph, 180)
+            . '</td></tr></table></td></tr></table></td></tr></table>'
+            . '</body></html>';
+
+        $pdf = (new HtmlToPdfConverter())->convert($html);
+
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertGreaterThanOrEqual(
+            3,
+            preg_match_all('/\/Type\s*\/Page\b/', $pdf),
+        );
+    }
+
     /**
      * Verifies the Japanese text is actually rendered with a
      * genuine, glyph-bearing CJK font, not merely that a PDF was

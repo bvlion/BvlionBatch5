@@ -179,6 +179,81 @@ final class HtmlToPdfConverter
                 }
             }
 
+            // Dompdf cannot split a table cell across pages. Email layouts
+            // commonly put the entire body in a deeply nested cell, which
+            // leaves the cell outside the visible page when it is taller
+            // than A4. Block layout lets the body flow across pages, and the
+            // width limits prevent a mail's fixed table or image width from
+            // extending past the right edge of the page.
+            foreach (
+                ['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'] as $tagName
+            ) {
+                foreach (
+                    iterator_to_array(
+                        $document->getElementsByTagName($tagName),
+                    ) as $element
+                ) {
+                    if (!$element instanceof DOMElement) {
+                        continue;
+                    }
+
+                    $replacement = $document->createElement('div');
+
+                    foreach (
+                        iterator_to_array($element->attributes) as $attribute
+                    ) {
+                        if (!$attribute instanceof \DOMAttr) {
+                            continue;
+                        }
+
+                        $replacement->setAttribute(
+                            $attribute->name,
+                            $attribute->value,
+                        );
+                    }
+
+                    $layoutStyle = trim($replacement->getAttribute('style'));
+                    $replacement->setAttribute(
+                        'style',
+                        $layoutStyle
+                            . ($layoutStyle === '' ? '' : '; ')
+                            . 'display: block !important; '
+                            . 'width: auto !important; '
+                            . 'max-width: 100% !important;',
+                    );
+
+                    while ($element->firstChild !== null) {
+                        $replacement->appendChild($element->firstChild);
+                    }
+
+                    $element->parentNode?->replaceChild(
+                        $replacement,
+                        $element,
+                    );
+                }
+            }
+
+            foreach (iterator_to_array($document->getElementsByTagName('img')) as $image) {
+                if (!$image instanceof DOMElement) {
+                    continue;
+                }
+
+                $layoutStyle = trim($image->getAttribute('style'));
+                $image->setAttribute(
+                    'style',
+                    $layoutStyle
+                        . ($layoutStyle === '' ? '' : '; ')
+                        . 'max-width: 100% !important; '
+                        . 'height: auto !important;',
+                );
+            }
+
+            $convertedHtml = $document->saveHTML();
+
+            if (is_string($convertedHtml)) {
+                $html = $convertedHtml;
+            }
+
             /** @var array<string, string|null> $resolvedImages */
             $resolvedImages = [];
             $totalImageBytes = 0;
