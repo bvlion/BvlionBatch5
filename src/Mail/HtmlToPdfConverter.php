@@ -314,16 +314,28 @@ final class HtmlToPdfConverter
                     'style',
                     $layoutStyle
                         . ($layoutStyle === '' ? '' : '; ')
-                        . 'max-width: 100% !important; '
-                        . 'height: auto !important;',
+                        . 'max-width: 100% !important;',
                 );
             }
 
             $convertedHtml = $document->saveHTML();
 
-            if (is_string($convertedHtml)) {
-                $html = $convertedHtml;
+            if (
+                !is_string($convertedHtml)
+                || strlen($convertedHtml) > self::MAX_HTML_BYTES
+            ) {
+                $writeLog([
+                    'event' => 'pdf_conversion_failed',
+                    'failure_reason' => 'html_size_limit',
+                ]);
+
+                throw new RuntimeException(
+                    'HTML body exceeds the maximum size allowed for PDF '
+                        . 'conversion.',
+                );
             }
+
+            $html = $convertedHtml;
 
             /** @var array<string, string|null> $resolvedImages */
             $resolvedImages = [];

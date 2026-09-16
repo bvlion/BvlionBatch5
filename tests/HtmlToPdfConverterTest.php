@@ -236,6 +236,49 @@ final class HtmlToPdfConverterTest extends TestCase
         (new HtmlToPdfConverter())->convert($oversizedHtml);
     }
 
+    public function testHtmlNormalizationCannotBypassHtmlSizeLimit(): void
+    {
+        $prefix = '<html><body><!--';
+        $suffix = '--><img src=""></body></html>';
+        $html = $prefix
+            . str_repeat(
+                'a',
+                HtmlToPdfConverter::MAX_HTML_BYTES
+                    - strlen($prefix)
+                    - strlen($suffix)
+                    - 1,
+            )
+            . $suffix;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage(
+            'HTML body exceeds the maximum size allowed for PDF '
+                . 'conversion.',
+        );
+
+        (new HtmlToPdfConverter())->convert($html);
+    }
+
+    public function testKeepsExplicitHeightForImageWithinPageWidth(): void
+    {
+        $imageContent = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+            . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+        $html = '<html><body>'
+            . str_repeat(
+                '<p><img src="data:image/png;base64,' . $imageContent
+                    . '" width="1" height="100"></p>',
+                10,
+            )
+            . '</body></html>';
+
+        $pdf = (new HtmlToPdfConverter())->convert($html);
+
+        self::assertGreaterThanOrEqual(
+            2,
+            preg_match_all('/\/Type\s*\/Page\b/', $pdf),
+        );
+    }
+
     public function testEmbedsContentIdImageInPdf(): void
     {
         $imageContent = base64_decode(
@@ -1137,7 +1180,10 @@ PHP,
         $suffix = '--></body></html>';
         $html = $prefix . str_repeat(
             'a',
-            HtmlToPdfConverter::MAX_HTML_BYTES - strlen($prefix) - strlen($suffix),
+            HtmlToPdfConverter::MAX_HTML_BYTES
+                - strlen($prefix)
+                - strlen($suffix)
+                - 64,
         ) . $suffix;
 
         try {
