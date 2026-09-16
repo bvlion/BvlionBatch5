@@ -512,21 +512,22 @@ final class HtmlToPdfConverter
                                 $curlOptions = [];
 
                                 if (!$isLiteralIp) {
-                                    $resolveEntries = [];
+                                    $resolveAddresses = [];
 
                                     foreach ($addresses as $address) {
-                                        $resolveEntries[] = sprintf(
-                                            '%s:%d:%s',
-                                            $resolvedHost,
-                                            $port,
+                                        $resolveAddresses[] =
                                             str_contains($address, ':')
                                                 ? '[' . $address . ']'
-                                                : $address,
-                                        );
+                                                : $address;
                                     }
 
                                     $curlOptions[CURLOPT_RESOLVE]
-                                        = $resolveEntries;
+                                        = [sprintf(
+                                            '%s:%d:%s',
+                                            $resolvedHost,
+                                            $port,
+                                            implode(',', $resolveAddresses),
+                                        )];
                                 }
 
                                 $response = $httpClient->request(

@@ -7,6 +7,7 @@ namespace BvlionBatch5\Tests;
 use BvlionBatch5\Mail\HtmlToPdfConverter;
 use FontLib\Font;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\InvalidArgumentException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -265,6 +266,150 @@ final class HtmlToPdfConverterTest extends TestCase
         );
         self::assertStringStartsWith('%PDF-', $pdf);
         self::assertStringContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testCurlResolveWithSeparateAddressEntriesUsesOnlyLastAddress(): void
+    {
+        $server = proc_open(
+            [
+                PHP_BINARY,
+                '-r',
+                <<<'PHP'
+$server = stream_socket_server('tcp://127.0.0.1:0');
+if (!is_resource($server)) {
+    exit(1);
+}
+
+fwrite(STDOUT, stream_socket_get_name($server, false) . "\n");
+$connection = stream_socket_accept($server, 10);
+
+if (is_resource($connection)) {
+    $request = '';
+
+    while (!str_contains($request, "\r\n\r\n")) {
+        $chunk = fread($connection, 8192);
+
+        if ($chunk === '' || $chunk === false) {
+            break;
+        }
+
+        $request .= $chunk;
+    }
+
+    fwrite($connection, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK");
+    fclose($connection);
+}
+
+fclose($server);
+PHP,
+            ],
+            [
+                0 => ['pipe', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w'],
+            ],
+            $pipes,
+        );
+        self::assertIsResource($server);
+        fclose($pipes[0]);
+        $serverAddress = fgets($pipes[1]);
+        self::assertIsString($serverAddress);
+        $port = (int) substr(strrchr(trim($serverAddress), ':'), 1);
+        self::assertGreaterThan(0, $port);
+
+        try {
+            $client = new Client();
+
+            try {
+                $client->request(
+                    'GET',
+                    "http://images.example.test:{$port}/image",
+                    [
+                        'connect_timeout' => 1,
+                        'proxy' => '',
+                        'curl' => [
+                            CURLOPT_RESOLVE => [
+                                "images.example.test:{$port}:127.0.0.1",
+                                "images.example.test:{$port}:[::1]",
+                            ],
+                        ],
+                    ],
+                );
+                self::fail('ConnectException was not thrown.');
+            } catch (ConnectException $exception) {
+                self::assertStringContainsString(
+                    'cURL error 7',
+                    $exception->getMessage(),
+                );
+            }
+
+            $response = $client->request(
+                'GET',
+                "http://images.example.test:{$port}/image",
+                [
+                    'connect_timeout' => 1,
+                    'proxy' => '',
+                    'curl' => [
+                        CURLOPT_RESOLVE => [
+                            "images.example.test:{$port}:127.0.0.1,[::1]",
+                        ],
+                    ],
+                ],
+            );
+
+            self::assertSame(200, $response->getStatusCode());
+            self::assertSame('OK', (string) $response->getBody());
+        } finally {
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($server);
+        }
+    }
+
+    public function testPassesResolvedAddressesInSingleCurlResolveEntry(): void
+    {
+        $requestOptions = [];
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
+
+        (new HtmlToPdfConverter())->convert(
+            '<html><body><img src="https://images.example.test/logo.png">'
+                . '</body></html>',
+            [],
+            new Client([
+                'handler' => static function (
+                    mixed $request,
+                    array $options,
+                ) use (
+                    &$requestOptions,
+                    $imageContent,
+                ) {
+                    $requestOptions = $options;
+
+                    return Create::promiseFor(new Response(
+                        200,
+                        ['Content-Type' => 'image/png'],
+                        $imageContent,
+                    ));
+                },
+            ]),
+            static fn (string $host): array => [
+                '93.184.216.34',
+                '2606:4700:4700::1111',
+            ],
+        );
+
+        self::assertSame(
+            [
+                'images.example.test:443:93.184.216.34,'
+                    . '[2606:4700:4700::1111]',
+            ],
+            $requestOptions['curl'][CURLOPT_RESOLVE],
+        );
     }
 
     public function testGuzzleCurlHandlerRejectsProtocolCurlOption(): void
