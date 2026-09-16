@@ -180,11 +180,11 @@ final class HtmlToPdfConverter
                 }
             }
 
-            // Dompdf cannot split a table cell across pages. Replace the
-            // outer table for a cell that contains a large body, while
-            // retaining tables inside that cell, such as ranking rows and
-            // columns.
-            $normalizedTables = [];
+            // Dompdf cannot split a table cell across pages. Normalize the
+            // table structure around a large body while retaining nested
+            // tables that are not part of that structure, such as ranking
+            // rows and columns.
+            $layoutElements = [];
 
             foreach (iterator_to_array($document->getElementsByTagName('td')) as $tableCell) {
                 if (
@@ -197,10 +197,12 @@ final class HtmlToPdfConverter
 
                 $ancestor = $tableCell;
                 $outerTable = null;
+                $tableAncestors = [];
 
                 while ($ancestor instanceof DOMElement) {
                     if (strtolower($ancestor->tagName) === 'table') {
                         $outerTable = $ancestor;
+                        $tableAncestors[] = $ancestor;
                     }
 
                     $ancestor = $ancestor->parentNode;
@@ -210,15 +212,67 @@ final class HtmlToPdfConverter
                     continue;
                 }
 
-                $tableIdentifier = spl_object_id($outerTable);
+                foreach (
+                    array_merge(
+                        [$outerTable],
+                        iterator_to_array($outerTable->getElementsByTagName('*')),
+                    ) as $element
+                ) {
+                    if (
+                        !$element instanceof DOMElement
+                        || !in_array(
+                            strtolower($element->tagName),
+                            ['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'],
+                            true,
+                        )
+                    ) {
+                        continue;
+                    }
 
-                if (isset($normalizedTables[$tableIdentifier])) {
-                    continue;
+                    $elementAncestor = $element;
+
+                    while ($elementAncestor instanceof DOMElement) {
+                        if (strtolower($elementAncestor->tagName) === 'table') {
+                            $isTableAncestor = false;
+
+                            foreach ($tableAncestors as $tableAncestor) {
+                                if ($elementAncestor->isSameNode($tableAncestor)) {
+                                    $isTableAncestor = true;
+                                    break;
+                                }
+                            }
+
+                            if (!$isTableAncestor) {
+                                continue 2;
+                            }
+                        }
+
+                        if ($elementAncestor->isSameNode($outerTable)) {
+                            break;
+                        }
+
+                        $elementAncestor = $elementAncestor->parentNode;
+                    }
+
+                    $isLayoutElement = false;
+
+                    foreach ($layoutElements as $layoutElement) {
+                        if ($element->isSameNode($layoutElement)) {
+                            $isLayoutElement = true;
+                            break;
+                        }
+                    }
+
+                    if (!$isLayoutElement) {
+                        $layoutElements[] = $element;
+                    }
                 }
+            }
 
+            foreach (array_reverse($layoutElements) as $element) {
                 $replacement = $document->createElement('div');
 
-                foreach (iterator_to_array($tableCell->attributes) as $attribute) {
+                foreach (iterator_to_array($element->attributes) as $attribute) {
                     if (!$attribute instanceof \DOMAttr) {
                         continue;
                     }
@@ -236,19 +290,18 @@ final class HtmlToPdfConverter
                         . ($layoutStyle === '' ? '' : '; ')
                         . 'display: block !important; '
                         . 'width: auto !important; '
-                        . 'max-width: 100% !important;',
+                        . 'max-width: 100% !important; '
+                        . 'word-wrap: break-word !important;',
                 );
 
-                while ($tableCell->firstChild !== null) {
-                    $replacement->appendChild($tableCell->firstChild);
+                while ($element->firstChild !== null) {
+                    $replacement->appendChild($element->firstChild);
                 }
 
-                $outerTable->parentNode?->replaceChild(
+                $element->parentNode?->replaceChild(
                     $replacement,
-                    $outerTable,
+                    $element,
                 );
-
-                $normalizedTables[$tableIdentifier] = true;
             }
 
             foreach (iterator_to_array($document->getElementsByTagName('img')) as $image) {

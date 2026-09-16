@@ -33,11 +33,13 @@ final class HtmlToPdfConverterTest extends TestCase
         $paragraph = '<p>Example body content that must remain within the '
             . 'visible PDF page area.</p>';
         $html = '<html><body><p>Example preheader.</p>'
-            . '<table width="1200"><tr><td><table><tr><td>'
+            . '<table width="1200"><tr><td>Header sibling content.</td></tr>'
+            . '<tr><td><table><tr><td>'
             . '<table><tr><td>' . str_repeat($paragraph, 180)
             . '<table><tr><td>First ranking</td>'
             . '<td>Second ranking</td></tr></table>'
-            . '</td></tr></table></td></tr></table></td></tr></table>'
+            . '</td></tr></table></td></tr></table></td></tr>'
+            . '<tr><td>Footer sibling content.</td></tr></table>'
             . '</body></html>';
 
         $pdf = (new HtmlToPdfConverter())->convert($html);
@@ -68,6 +70,14 @@ final class HtmlToPdfConverterTest extends TestCase
         );
         self::assertStringContainsString(
             mb_convert_encoding('Second ranking', 'UTF-16BE', 'UTF-8'),
+            $decodedStreams,
+        );
+        self::assertStringContainsString(
+            mb_convert_encoding('Header sibling content.', 'UTF-16BE', 'UTF-8'),
+            $decodedStreams,
+        );
+        self::assertStringContainsString(
+            mb_convert_encoding('Footer sibling content.', 'UTF-16BE', 'UTF-8'),
             $decodedStreams,
         );
     }
