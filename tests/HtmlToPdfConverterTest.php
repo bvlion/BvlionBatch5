@@ -32,13 +32,11 @@ final class HtmlToPdfConverterTest extends TestCase
     {
         $paragraph = '<p>Example body content that must remain within the '
             . 'visible PDF page area.</p>';
-        $longLinkText = str_repeat('RankingLinkSegment', 12);
         $html = '<html><body><p>Example preheader.</p>'
             . '<table width="1200"><tr><td>Header sibling content.</td></tr>'
             . '<tr><td><table><tr><td>'
             . '<table><tr><td>' . str_repeat($paragraph, 180)
-            . '<table width="1200"><tr><td><a href="https://example.test/">'
-            . $longLinkText . '</a></td><td>First ranking</td>'
+            . '<table><tr><td>First ranking</td>'
             . '<td>Second ranking</td></tr></table>'
             . '</td></tr></table></td></tr></table></td></tr>'
             . '<tr><td>Footer sibling content.</td></tr></table>'
@@ -81,18 +79,6 @@ final class HtmlToPdfConverterTest extends TestCase
         self::assertStringContainsString(
             mb_convert_encoding('Footer sibling content.', 'UTF-16BE', 'UTF-8'),
             $decodedStreams,
-        );
-        $renderedLinkSegmentCount = substr_count(
-            $decodedStreams,
-            mb_convert_encoding('RankingLinkSegment', 'UTF-16BE', 'UTF-8'),
-        );
-        self::assertGreaterThan(
-            0,
-            $renderedLinkSegmentCount,
-        );
-        self::assertLessThan(
-            12,
-            $renderedLinkSegmentCount,
         );
     }
 

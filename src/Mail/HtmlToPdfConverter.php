@@ -185,7 +185,6 @@ final class HtmlToPdfConverter
             // tables that are not part of that structure, such as ranking
             // rows and columns.
             $layoutElements = [];
-            $preservedTables = [];
 
             foreach (iterator_to_array($document->getElementsByTagName('td')) as $tableCell) {
                 if (
@@ -244,19 +243,6 @@ final class HtmlToPdfConverter
                             }
 
                             if (!$isTableAncestor) {
-                                $isPreservedTable = false;
-
-                                foreach ($preservedTables as $preservedTable) {
-                                    if ($elementAncestor->isSameNode($preservedTable)) {
-                                        $isPreservedTable = true;
-                                        break;
-                                    }
-                                }
-
-                                if (!$isPreservedTable) {
-                                    $preservedTables[] = $elementAncestor;
-                                }
-
                                 continue 2;
                             }
                         }
@@ -316,40 +302,6 @@ final class HtmlToPdfConverter
                     $replacement,
                     $element,
                 );
-            }
-
-            foreach ($preservedTables as $preservedTable) {
-                $layoutStyle = trim($preservedTable->getAttribute('style'));
-                $preservedTable->setAttribute(
-                    'style',
-                    $layoutStyle
-                        . ($layoutStyle === '' ? '' : '; ')
-                        . 'width: 100% !important; '
-                        . 'max-width: 100% !important; '
-                        . 'table-layout: fixed !important;',
-                );
-
-                foreach (
-                    ['td', 'th'] as $tagName
-                ) {
-                    foreach (
-                        iterator_to_array(
-                            $preservedTable->getElementsByTagName($tagName),
-                        ) as $tableCell
-                    ) {
-                        if (!$tableCell instanceof DOMElement) {
-                            continue;
-                        }
-
-                        $layoutStyle = trim($tableCell->getAttribute('style'));
-                        $tableCell->setAttribute(
-                            'style',
-                            $layoutStyle
-                                . ($layoutStyle === '' ? '' : '; ')
-                                . 'word-wrap: break-word !important;',
-                        );
-                    }
-                }
             }
 
             foreach (iterator_to_array($document->getElementsByTagName('img')) as $image) {
