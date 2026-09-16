@@ -255,11 +255,39 @@ final class HtmlToPdfConverterTest extends TestCase
             CURLOPT_RESOLVE,
             $requestHistory[0]['options']['curl'],
         );
+        self::assertSame(
+            ['http', 'https'],
+            $requestHistory[0]['options']['protocols'],
+        );
+        self::assertArrayNotHasKey(
+            CURLOPT_PROTOCOLS,
+            $requestHistory[0]['options']['curl'],
+        );
         self::assertStringStartsWith('%PDF-', $pdf);
         self::assertStringContainsString('/Subtype /Image', $pdf);
     }
 
-    public function testFetchesImageWithCurlResolveWithoutUsingStreamHandler(): void
+    public function testGuzzleCurlHandlerRejectsProtocolCurlOption(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches(
+            '/Passing CURLOPT_PROTOCOLS.*"curl" request option.*'
+                . 'Guzzle-managed request handling.*"protocols" request '
+                . 'option/',
+        );
+
+        (new Client())->request(
+            'GET',
+            'https://images.example.test/logo.png',
+            [
+                'curl' => [
+                    CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+                ],
+            ],
+        );
+    }
+
+    public function testFetchesImageWithCurlResolveAndGuzzleProtocols(): void
     {
         $imageContent = base64_decode(
             'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
@@ -291,6 +319,11 @@ final class HtmlToPdfConverterTest extends TestCase
 
                     self::assertArrayNotHasKey('stream', $options);
                     self::assertArrayHasKey(CURLOPT_RESOLVE, $options['curl']);
+                    self::assertArrayNotHasKey(
+                        CURLOPT_PROTOCOLS,
+                        $options['curl'],
+                    );
+                    self::assertSame(['http', 'https'], $options['protocols']);
 
                     return Create::promiseFor(new Response(
                         200,
@@ -304,6 +337,70 @@ final class HtmlToPdfConverterTest extends TestCase
 
         self::assertStringStartsWith('%PDF-', $pdf);
         self::assertStringContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testCliConvertsHtmlFileToPdfAndLogsImageProcessing(): void
+    {
+        $htmlPath = tempnam(sys_get_temp_dir(), 'bvlion-html-to-pdf-test-');
+        $pdfPath = tempnam(sys_get_temp_dir(), 'bvlion-html-to-pdf-test-');
+        $logPath = tempnam(sys_get_temp_dir(), 'bvlion-html-to-pdf-log-');
+        self::assertIsString($htmlPath);
+        self::assertIsString($pdfPath);
+        self::assertIsString($logPath);
+        @unlink($pdfPath);
+
+        try {
+            $html = '<html><body><img src="data:image/png;base64,'
+                . 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="'
+                . '><p>Example body.</p></body></html>';
+            self::assertNotFalse(file_put_contents($htmlPath, $html));
+
+            $process = proc_open(
+                [
+                    PHP_BINARY,
+                    '-d',
+                    'error_log=' . $logPath,
+                    dirname(__DIR__) . '/bin/convert-html-to-pdf.php',
+                    $htmlPath,
+                    $pdfPath,
+                ],
+                [
+                    1 => ['pipe', 'w'],
+                    2 => ['pipe', 'w'],
+                ],
+                $pipes,
+                dirname(__DIR__),
+            );
+            self::assertIsResource($process);
+
+            $standardOutput = stream_get_contents($pipes[1]);
+            fclose($pipes[1]);
+            $standardError = stream_get_contents($pipes[2]);
+            fclose($pipes[2]);
+            $exitCode = proc_close($process);
+
+            self::assertSame(0, $exitCode);
+            self::assertSame('', $standardError);
+            self::assertSame("PDF written: {$pdfPath}\n", $standardOutput);
+            $pdf = file_get_contents($pdfPath);
+            self::assertIsString($pdf);
+            self::assertStringStartsWith('%PDF-', $pdf);
+            $logContent = file_get_contents($logPath);
+            self::assertIsString($logContent);
+            self::assertStringContainsString(
+                '"conversion_context":"cli"',
+                $logContent,
+            );
+            self::assertStringContainsString(
+                '"event":"pdf_image_processing_started"',
+                $logContent,
+            );
+        } finally {
+            @unlink($htmlPath);
+            @unlink($pdfPath);
+            @unlink($logPath);
+        }
     }
 
     public function testRejectsImageWhenContentLengthIsMissingOrUnderstated(): void

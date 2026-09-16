@@ -509,10 +509,7 @@ final class HtmlToPdfConverter
                                     break;
                                 }
 
-                                $curlOptions = [
-                                    CURLOPT_PROTOCOLS => CURLPROTO_HTTP
-                                        | CURLPROTO_HTTPS,
-                                ];
+                                $curlOptions = [];
 
                                 if (!$isLiteralIp) {
                                     $resolveEntries = [];
@@ -545,6 +542,7 @@ final class HtmlToPdfConverter
                                         'http_errors' => false,
                                         'decode_content' => false,
                                         'proxy' => '',
+                                        'protocols' => ['http', 'https'],
                                         'progress' => static function (
                                             $downloadTotal,
                                             $downloaded,
