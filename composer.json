@@ -36,6 +36,7 @@
         "lint": [
             "@php -l bin/check-slack.php",
             "@php -l bin/check-imap.php",
+            "@php -l bin/convert-html-to-pdf.php",
             "@php -l bin/migrate.php",
             "@php -l bin/export-legacy-data.php",
             "@php -l bin/import-legacy-data.php",

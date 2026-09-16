@@ -64,6 +64,7 @@ final class HtmlToPdfConverter
     public const MAX_HTML_BYTES = 5_000_000;
     public const MAX_IMAGE_BYTES = 2_000_000;
     public const MAX_TOTAL_IMAGE_BYTES = 4_000_000;
+    private const TABLE_CELL_LAYOUT_NORMALIZATION_TEXT_LENGTH = 2_000;
     private const IMAGE_CONNECT_TIMEOUT_SECONDS = 3;
     private const IMAGE_TIMEOUT_SECONDS = 10;
     private const MAX_IMAGE_REDIRECTS = 3;
@@ -178,6 +179,163 @@ final class HtmlToPdfConverter
                     $document->removeChild($childNode);
                 }
             }
+
+            // Dompdf cannot split a table cell across pages. Normalize the
+            // table structure around a large body while retaining nested
+            // tables that are not part of that structure, such as ranking
+            // rows and columns.
+            $layoutElements = [];
+
+            foreach (iterator_to_array($document->getElementsByTagName('td')) as $tableCell) {
+                if (
+                    !$tableCell instanceof DOMElement
+                    || mb_strlen(trim($tableCell->textContent))
+                        < self::TABLE_CELL_LAYOUT_NORMALIZATION_TEXT_LENGTH
+                ) {
+                    continue;
+                }
+
+                $ancestor = $tableCell;
+                $outerTable = null;
+                $tableAncestors = [];
+
+                while ($ancestor instanceof DOMElement) {
+                    if (strtolower($ancestor->tagName) === 'table') {
+                        $outerTable = $ancestor;
+                        $tableAncestors[] = $ancestor;
+                    }
+
+                    $ancestor = $ancestor->parentNode;
+                }
+
+                if (!$outerTable instanceof DOMElement) {
+                    continue;
+                }
+
+                foreach (
+                    array_merge(
+                        [$outerTable],
+                        iterator_to_array($outerTable->getElementsByTagName('*')),
+                    ) as $element
+                ) {
+                    if (
+                        !$element instanceof DOMElement
+                        || !in_array(
+                            strtolower($element->tagName),
+                            ['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'],
+                            true,
+                        )
+                    ) {
+                        continue;
+                    }
+
+                    $elementAncestor = $element;
+
+                    while ($elementAncestor instanceof DOMElement) {
+                        if (strtolower($elementAncestor->tagName) === 'table') {
+                            $isTableAncestor = false;
+
+                            foreach ($tableAncestors as $tableAncestor) {
+                                if ($elementAncestor->isSameNode($tableAncestor)) {
+                                    $isTableAncestor = true;
+                                    break;
+                                }
+                            }
+
+                            if (!$isTableAncestor) {
+                                continue 2;
+                            }
+                        }
+
+                        if ($elementAncestor->isSameNode($outerTable)) {
+                            break;
+                        }
+
+                        $elementAncestor = $elementAncestor->parentNode;
+                    }
+
+                    $isLayoutElement = false;
+
+                    foreach ($layoutElements as $layoutElement) {
+                        if ($element->isSameNode($layoutElement)) {
+                            $isLayoutElement = true;
+                            break;
+                        }
+                    }
+
+                    if (!$isLayoutElement) {
+                        $layoutElements[] = $element;
+                    }
+                }
+            }
+
+            foreach (array_reverse($layoutElements) as $element) {
+                $replacement = $document->createElement('div');
+
+                foreach (iterator_to_array($element->attributes) as $attribute) {
+                    if (!$attribute instanceof \DOMAttr) {
+                        continue;
+                    }
+
+                    $replacement->setAttribute(
+                        $attribute->name,
+                        $attribute->value,
+                    );
+                }
+
+                $layoutStyle = trim($replacement->getAttribute('style'));
+                $replacement->setAttribute(
+                    'style',
+                    $layoutStyle
+                        . ($layoutStyle === '' ? '' : '; ')
+                        . 'display: block !important; '
+                        . 'width: auto !important; '
+                        . 'max-width: 100% !important; '
+                        . 'word-wrap: break-word !important;',
+                );
+
+                while ($element->firstChild !== null) {
+                    $replacement->appendChild($element->firstChild);
+                }
+
+                $element->parentNode?->replaceChild(
+                    $replacement,
+                    $element,
+                );
+            }
+
+            foreach (iterator_to_array($document->getElementsByTagName('img')) as $image) {
+                if (!$image instanceof DOMElement) {
+                    continue;
+                }
+
+                $layoutStyle = trim($image->getAttribute('style'));
+                $image->setAttribute(
+                    'style',
+                    $layoutStyle
+                        . ($layoutStyle === '' ? '' : '; ')
+                        . 'max-width: 100% !important;',
+                );
+            }
+
+            $convertedHtml = $document->saveHTML();
+
+            if (
+                !is_string($convertedHtml)
+                || strlen($convertedHtml) > self::MAX_HTML_BYTES
+            ) {
+                $writeLog([
+                    'event' => 'pdf_conversion_failed',
+                    'failure_reason' => 'html_size_limit',
+                ]);
+
+                throw new RuntimeException(
+                    'HTML body exceeds the maximum size allowed for PDF '
+                        . 'conversion.',
+                );
+            }
+
+            $html = $convertedHtml;
 
             /** @var array<string, string|null> $resolvedImages */
             $resolvedImages = [];
@@ -509,27 +667,25 @@ final class HtmlToPdfConverter
                                     break;
                                 }
 
-                                $curlOptions = [
-                                    CURLOPT_PROTOCOLS => CURLPROTO_HTTP
-                                        | CURLPROTO_HTTPS,
-                                ];
+                                $curlOptions = [];
 
                                 if (!$isLiteralIp) {
-                                    $resolveEntries = [];
+                                    $resolveAddresses = [];
 
                                     foreach ($addresses as $address) {
-                                        $resolveEntries[] = sprintf(
-                                            '%s:%d:%s',
-                                            $resolvedHost,
-                                            $port,
+                                        $resolveAddresses[] =
                                             str_contains($address, ':')
                                                 ? '[' . $address . ']'
-                                                : $address,
-                                        );
+                                                : $address;
                                     }
 
                                     $curlOptions[CURLOPT_RESOLVE]
-                                        = $resolveEntries;
+                                        = [sprintf(
+                                            '%s:%d:%s',
+                                            $resolvedHost,
+                                            $port,
+                                            implode(',', $resolveAddresses),
+                                        )];
                                 }
 
                                 $response = $httpClient->request(
@@ -545,6 +701,7 @@ final class HtmlToPdfConverter
                                         'http_errors' => false,
                                         'decode_content' => false,
                                         'proxy' => '',
+                                        'protocols' => ['http', 'https'],
                                         'progress' => static function (
                                             $downloadTotal,
                                             $downloaded,

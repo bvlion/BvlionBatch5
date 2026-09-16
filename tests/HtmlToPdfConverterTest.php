@@ -7,6 +7,7 @@ namespace BvlionBatch5\Tests;
 use BvlionBatch5\Mail\HtmlToPdfConverter;
 use FontLib\Font;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\InvalidArgumentException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -25,6 +26,60 @@ final class HtmlToPdfConverterTest extends TestCase
         );
 
         self::assertStringStartsWith('%PDF-', $pdf);
+    }
+
+    public function testConvertsNestedTableCellContentAcrossPages(): void
+    {
+        $paragraph = '<p>Example body content that must remain within the '
+            . 'visible PDF page area.</p>';
+        $html = '<html><body><p>Example preheader.</p>'
+            . '<table width="1200"><tr><td>Header sibling content.</td></tr>'
+            . '<tr><td><table><tr><td>'
+            . '<table><tr><td>' . str_repeat($paragraph, 180)
+            . '<table><tr><td>First ranking</td>'
+            . '<td>Second ranking</td></tr></table>'
+            . '</td></tr></table></td></tr></table></td></tr>'
+            . '<tr><td>Footer sibling content.</td></tr></table>'
+            . '</body></html>';
+
+        $pdf = (new HtmlToPdfConverter())->convert($html);
+
+        self::assertStringStartsWith('%PDF-', $pdf);
+        self::assertGreaterThanOrEqual(
+            3,
+            preg_match_all('/\/Type\s*\/Page\b/', $pdf),
+        );
+        preg_match_all(
+            '/\/Filter \/FlateDecode.*?stream\r?\n(.*?)\r?\nendstream/s',
+            $pdf,
+            $compressedStreams,
+        );
+        $decodedStreams = '';
+
+        foreach ($compressedStreams[1] as $compressedStream) {
+            $decodedStream = gzuncompress($compressedStream);
+
+            if (is_string($decodedStream)) {
+                $decodedStreams .= $decodedStream;
+            }
+        }
+
+        self::assertStringContainsString(
+            mb_convert_encoding('First ranking', 'UTF-16BE', 'UTF-8'),
+            $decodedStreams,
+        );
+        self::assertStringContainsString(
+            mb_convert_encoding('Second ranking', 'UTF-16BE', 'UTF-8'),
+            $decodedStreams,
+        );
+        self::assertStringContainsString(
+            mb_convert_encoding('Header sibling content.', 'UTF-16BE', 'UTF-8'),
+            $decodedStreams,
+        );
+        self::assertStringContainsString(
+            mb_convert_encoding('Footer sibling content.', 'UTF-16BE', 'UTF-8'),
+            $decodedStreams,
+        );
     }
 
     /**
@@ -181,6 +236,49 @@ final class HtmlToPdfConverterTest extends TestCase
         (new HtmlToPdfConverter())->convert($oversizedHtml);
     }
 
+    public function testHtmlNormalizationCannotBypassHtmlSizeLimit(): void
+    {
+        $prefix = '<html><body><!--';
+        $suffix = '--><img src=""></body></html>';
+        $html = $prefix
+            . str_repeat(
+                'a',
+                HtmlToPdfConverter::MAX_HTML_BYTES
+                    - strlen($prefix)
+                    - strlen($suffix)
+                    - 1,
+            )
+            . $suffix;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage(
+            'HTML body exceeds the maximum size allowed for PDF '
+                . 'conversion.',
+        );
+
+        (new HtmlToPdfConverter())->convert($html);
+    }
+
+    public function testKeepsExplicitHeightForImageWithinPageWidth(): void
+    {
+        $imageContent = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+            . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+        $html = '<html><body>'
+            . str_repeat(
+                '<p><img src="data:image/png;base64,' . $imageContent
+                    . '" width="1" height="100"></p>',
+                10,
+            )
+            . '</body></html>';
+
+        $pdf = (new HtmlToPdfConverter())->convert($html);
+
+        self::assertGreaterThanOrEqual(
+            2,
+            preg_match_all('/\/Type\s*\/Page\b/', $pdf),
+        );
+    }
+
     public function testEmbedsContentIdImageInPdf(): void
     {
         $imageContent = base64_decode(
@@ -255,11 +353,183 @@ final class HtmlToPdfConverterTest extends TestCase
             CURLOPT_RESOLVE,
             $requestHistory[0]['options']['curl'],
         );
+        self::assertSame(
+            ['http', 'https'],
+            $requestHistory[0]['options']['protocols'],
+        );
+        self::assertArrayNotHasKey(
+            CURLOPT_PROTOCOLS,
+            $requestHistory[0]['options']['curl'],
+        );
         self::assertStringStartsWith('%PDF-', $pdf);
         self::assertStringContainsString('/Subtype /Image', $pdf);
     }
 
-    public function testFetchesImageWithCurlResolveWithoutUsingStreamHandler(): void
+    public function testCurlResolveWithSeparateAddressEntriesUsesOnlyLastAddress(): void
+    {
+        $server = proc_open(
+            [
+                PHP_BINARY,
+                '-r',
+                <<<'PHP'
+$server = stream_socket_server('tcp://127.0.0.1:0');
+if (!is_resource($server)) {
+    exit(1);
+}
+
+fwrite(STDOUT, stream_socket_get_name($server, false) . "\n");
+$connection = stream_socket_accept($server, 10);
+
+if (is_resource($connection)) {
+    $request = '';
+
+    while (!str_contains($request, "\r\n\r\n")) {
+        $chunk = fread($connection, 8192);
+
+        if ($chunk === '' || $chunk === false) {
+            break;
+        }
+
+        $request .= $chunk;
+    }
+
+    fwrite($connection, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK");
+    fclose($connection);
+}
+
+fclose($server);
+PHP,
+            ],
+            [
+                0 => ['pipe', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w'],
+            ],
+            $pipes,
+        );
+        self::assertIsResource($server);
+        fclose($pipes[0]);
+        $serverAddress = fgets($pipes[1]);
+        self::assertIsString($serverAddress);
+        $port = (int) substr(strrchr(trim($serverAddress), ':'), 1);
+        self::assertGreaterThan(0, $port);
+
+        try {
+            $client = new Client();
+
+            try {
+                $client->request(
+                    'GET',
+                    "http://images.example.test:{$port}/image",
+                    [
+                        'connect_timeout' => 1,
+                        'proxy' => '',
+                        'curl' => [
+                            CURLOPT_RESOLVE => [
+                                "images.example.test:{$port}:127.0.0.1",
+                                "images.example.test:{$port}:[::1]",
+                            ],
+                        ],
+                    ],
+                );
+                self::fail('ConnectException was not thrown.');
+            } catch (ConnectException $exception) {
+                self::assertStringContainsString(
+                    'cURL error 7',
+                    $exception->getMessage(),
+                );
+            }
+
+            $response = $client->request(
+                'GET',
+                "http://images.example.test:{$port}/image",
+                [
+                    'connect_timeout' => 1,
+                    'proxy' => '',
+                    'curl' => [
+                        CURLOPT_RESOLVE => [
+                            "images.example.test:{$port}:127.0.0.1,[::1]",
+                        ],
+                    ],
+                ],
+            );
+
+            self::assertSame(200, $response->getStatusCode());
+            self::assertSame('OK', (string) $response->getBody());
+        } finally {
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($server);
+        }
+    }
+
+    public function testPassesResolvedAddressesInSingleCurlResolveEntry(): void
+    {
+        $requestOptions = [];
+        $imageContent = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true,
+        );
+        self::assertIsString($imageContent);
+
+        (new HtmlToPdfConverter())->convert(
+            '<html><body><img src="https://images.example.test/logo.png">'
+                . '</body></html>',
+            [],
+            new Client([
+                'handler' => static function (
+                    mixed $request,
+                    array $options,
+                ) use (
+                    &$requestOptions,
+                    $imageContent,
+                ) {
+                    $requestOptions = $options;
+
+                    return Create::promiseFor(new Response(
+                        200,
+                        ['Content-Type' => 'image/png'],
+                        $imageContent,
+                    ));
+                },
+            ]),
+            static fn (string $host): array => [
+                '93.184.216.34',
+                '2606:4700:4700::1111',
+            ],
+        );
+
+        self::assertSame(
+            [
+                'images.example.test:443:93.184.216.34,'
+                    . '[2606:4700:4700::1111]',
+            ],
+            $requestOptions['curl'][CURLOPT_RESOLVE],
+        );
+    }
+
+    public function testGuzzleCurlHandlerRejectsProtocolCurlOption(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches(
+            '/Passing CURLOPT_PROTOCOLS.*"curl" request option.*'
+                . 'Guzzle-managed request handling.*"protocols" request '
+                . 'option/',
+        );
+
+        (new Client())->request(
+            'GET',
+            'https://images.example.test/logo.png',
+            [
+                'curl' => [
+                    CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+                ],
+            ],
+        );
+    }
+
+    public function testFetchesImageWithCurlResolveAndGuzzleProtocols(): void
     {
         $imageContent = base64_decode(
             'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
@@ -291,6 +561,11 @@ final class HtmlToPdfConverterTest extends TestCase
 
                     self::assertArrayNotHasKey('stream', $options);
                     self::assertArrayHasKey(CURLOPT_RESOLVE, $options['curl']);
+                    self::assertArrayNotHasKey(
+                        CURLOPT_PROTOCOLS,
+                        $options['curl'],
+                    );
+                    self::assertSame(['http', 'https'], $options['protocols']);
 
                     return Create::promiseFor(new Response(
                         200,
@@ -304,6 +579,70 @@ final class HtmlToPdfConverterTest extends TestCase
 
         self::assertStringStartsWith('%PDF-', $pdf);
         self::assertStringContainsString('/Subtype /Image', $pdf);
+    }
+
+    public function testCliConvertsHtmlFileToPdfAndLogsImageProcessing(): void
+    {
+        $htmlPath = tempnam(sys_get_temp_dir(), 'bvlion-html-to-pdf-test-');
+        $pdfPath = tempnam(sys_get_temp_dir(), 'bvlion-html-to-pdf-test-');
+        $logPath = tempnam(sys_get_temp_dir(), 'bvlion-html-to-pdf-log-');
+        self::assertIsString($htmlPath);
+        self::assertIsString($pdfPath);
+        self::assertIsString($logPath);
+        @unlink($pdfPath);
+
+        try {
+            $html = '<html><body><img src="data:image/png;base64,'
+                . 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                . 'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="'
+                . '><p>Example body.</p></body></html>';
+            self::assertNotFalse(file_put_contents($htmlPath, $html));
+
+            $process = proc_open(
+                [
+                    PHP_BINARY,
+                    '-d',
+                    'error_log=' . $logPath,
+                    dirname(__DIR__) . '/bin/convert-html-to-pdf.php',
+                    $htmlPath,
+                    $pdfPath,
+                ],
+                [
+                    1 => ['pipe', 'w'],
+                    2 => ['pipe', 'w'],
+                ],
+                $pipes,
+                dirname(__DIR__),
+            );
+            self::assertIsResource($process);
+
+            $standardOutput = stream_get_contents($pipes[1]);
+            fclose($pipes[1]);
+            $standardError = stream_get_contents($pipes[2]);
+            fclose($pipes[2]);
+            $exitCode = proc_close($process);
+
+            self::assertSame(0, $exitCode);
+            self::assertSame('', $standardError);
+            self::assertSame("PDF written: {$pdfPath}\n", $standardOutput);
+            $pdf = file_get_contents($pdfPath);
+            self::assertIsString($pdf);
+            self::assertStringStartsWith('%PDF-', $pdf);
+            $logContent = file_get_contents($logPath);
+            self::assertIsString($logContent);
+            self::assertStringContainsString(
+                '"conversion_context":"cli"',
+                $logContent,
+            );
+            self::assertStringContainsString(
+                '"event":"pdf_image_processing_started"',
+                $logContent,
+            );
+        } finally {
+            @unlink($htmlPath);
+            @unlink($pdfPath);
+            @unlink($logPath);
+        }
     }
 
     public function testRejectsImageWhenContentLengthIsMissingOrUnderstated(): void
@@ -841,7 +1180,10 @@ final class HtmlToPdfConverterTest extends TestCase
         $suffix = '--></body></html>';
         $html = $prefix . str_repeat(
             'a',
-            HtmlToPdfConverter::MAX_HTML_BYTES - strlen($prefix) - strlen($suffix),
+            HtmlToPdfConverter::MAX_HTML_BYTES
+                - strlen($prefix)
+                - strlen($suffix)
+                - 64,
         ) . $suffix;
 
         try {

@@ -459,6 +459,16 @@ SSH host key verificationは`DEPLOY_SSH_KNOWN_HOSTS`を使って必ず有効な�
 - HTTPアクセスの記録や、PHP/Apacheレベルの未捕捉エラーは、アプリケーションではなくXServer側のアクセスログ・エラーログで確認します。ただし、そのログの具体的な保存先(絶対パス)は、`docs/production-environment.md`を含め今回確認できた事実の範囲には含まれていません。**推測でパスを記載することはできないため、XServerのサーバーパネルまたは公式ドキュメントで確認してください。** 確認できた内容は、必要に応じて`docs/production-environment.md`へ追記することを想定しています。
 - Bearer Token、Slack Bot Token、IMAPパスワードなどの秘密情報、メール本文・メールアドレスなどの個人情報を、独自ログへ保存する実装は存在しません。既存の疎通確認コマンド(`bin/check-slack.php`、`bin/check-imap.php`)も、失敗時の診断情報から設定値そのものを除去する実装になっています(「Slack App設定」「メール検索」節を参照)。
 
+### HTMLメールPDF変換のローカル確認
+
+保存したHTMLメールを既存の`HtmlToPdfConverter`へ直接渡して、PDFと画像処理ログを確認できます。
+
+```shell
+/opt/php-8.5.5/bin/php bin/convert-html-to-pdf.php <html-file> [pdf-file]
+```
+
+`pdf-file`を省略すると、入力ファイル名へ`.pdf`を付加したパスへ出力します。外部画像の取得、取得失敗時のfallback、画像処理ログはメール処理時と同じ変換処理を使用します。出力先は標準出力に表示され、画像処理ログはPHPのエラーログで確認します。
+
 ### /healthに依存しない疎通確認
 
 `/health`エンドポイントは実装しません。疎通確認は次の手順で行います。
