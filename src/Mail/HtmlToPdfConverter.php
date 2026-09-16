@@ -64,6 +64,7 @@ final class HtmlToPdfConverter
     public const MAX_HTML_BYTES = 5_000_000;
     public const MAX_IMAGE_BYTES = 2_000_000;
     public const MAX_TOTAL_IMAGE_BYTES = 4_000_000;
+    private const TABLE_CELL_LAYOUT_NORMALIZATION_TEXT_LENGTH = 2_000;
     private const IMAGE_CONNECT_TIMEOUT_SECONDS = 3;
     private const IMAGE_TIMEOUT_SECONDS = 10;
     private const MAX_IMAGE_REDIRECTS = 3;
@@ -179,58 +180,75 @@ final class HtmlToPdfConverter
                 }
             }
 
-            // Dompdf cannot split a table cell across pages. Email layouts
-            // commonly put the entire body in a deeply nested cell, which
-            // leaves the cell outside the visible page when it is taller
-            // than A4. Block layout lets the body flow across pages, and the
-            // width limits prevent a mail's fixed table or image width from
-            // extending past the right edge of the page.
-            foreach (
-                ['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'] as $tagName
-            ) {
-                foreach (
-                    iterator_to_array(
-                        $document->getElementsByTagName($tagName),
-                    ) as $element
+            // Dompdf cannot split a table cell across pages. Replace the
+            // outer table for a cell that contains a large body, while
+            // retaining tables inside that cell, such as ranking rows and
+            // columns.
+            $normalizedTables = [];
+
+            foreach (iterator_to_array($document->getElementsByTagName('td')) as $tableCell) {
+                if (
+                    !$tableCell instanceof DOMElement
+                    || mb_strlen(trim($tableCell->textContent))
+                        < self::TABLE_CELL_LAYOUT_NORMALIZATION_TEXT_LENGTH
                 ) {
-                    if (!$element instanceof DOMElement) {
+                    continue;
+                }
+
+                $ancestor = $tableCell;
+                $outerTable = null;
+
+                while ($ancestor instanceof DOMElement) {
+                    if (strtolower($ancestor->tagName) === 'table') {
+                        $outerTable = $ancestor;
+                    }
+
+                    $ancestor = $ancestor->parentNode;
+                }
+
+                if (!$outerTable instanceof DOMElement) {
+                    continue;
+                }
+
+                $tableIdentifier = spl_object_id($outerTable);
+
+                if (isset($normalizedTables[$tableIdentifier])) {
+                    continue;
+                }
+
+                $replacement = $document->createElement('div');
+
+                foreach (iterator_to_array($tableCell->attributes) as $attribute) {
+                    if (!$attribute instanceof \DOMAttr) {
                         continue;
                     }
 
-                    $replacement = $document->createElement('div');
-
-                    foreach (
-                        iterator_to_array($element->attributes) as $attribute
-                    ) {
-                        if (!$attribute instanceof \DOMAttr) {
-                            continue;
-                        }
-
-                        $replacement->setAttribute(
-                            $attribute->name,
-                            $attribute->value,
-                        );
-                    }
-
-                    $layoutStyle = trim($replacement->getAttribute('style'));
                     $replacement->setAttribute(
-                        'style',
-                        $layoutStyle
-                            . ($layoutStyle === '' ? '' : '; ')
-                            . 'display: block !important; '
-                            . 'width: auto !important; '
-                            . 'max-width: 100% !important;',
-                    );
-
-                    while ($element->firstChild !== null) {
-                        $replacement->appendChild($element->firstChild);
-                    }
-
-                    $element->parentNode?->replaceChild(
-                        $replacement,
-                        $element,
+                        $attribute->name,
+                        $attribute->value,
                     );
                 }
+
+                $layoutStyle = trim($replacement->getAttribute('style'));
+                $replacement->setAttribute(
+                    'style',
+                    $layoutStyle
+                        . ($layoutStyle === '' ? '' : '; ')
+                        . 'display: block !important; '
+                        . 'width: auto !important; '
+                        . 'max-width: 100% !important;',
+                );
+
+                while ($tableCell->firstChild !== null) {
+                    $replacement->appendChild($tableCell->firstChild);
+                }
+
+                $outerTable->parentNode?->replaceChild(
+                    $replacement,
+                    $outerTable,
+                );
+
+                $normalizedTables[$tableIdentifier] = true;
             }
 
             foreach (iterator_to_array($document->getElementsByTagName('img')) as $image) {

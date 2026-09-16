@@ -35,6 +35,8 @@ final class HtmlToPdfConverterTest extends TestCase
         $html = '<html><body><p>Example preheader.</p>'
             . '<table width="1200"><tr><td><table><tr><td>'
             . '<table><tr><td>' . str_repeat($paragraph, 180)
+            . '<table><tr><td>First ranking</td>'
+            . '<td>Second ranking</td></tr></table>'
             . '</td></tr></table></td></tr></table></td></tr></table>'
             . '</body></html>';
 
@@ -44,6 +46,29 @@ final class HtmlToPdfConverterTest extends TestCase
         self::assertGreaterThanOrEqual(
             3,
             preg_match_all('/\/Type\s*\/Page\b/', $pdf),
+        );
+        preg_match_all(
+            '/\/Filter \/FlateDecode.*?stream\r?\n(.*?)\r?\nendstream/s',
+            $pdf,
+            $compressedStreams,
+        );
+        $decodedStreams = '';
+
+        foreach ($compressedStreams[1] as $compressedStream) {
+            $decodedStream = gzuncompress($compressedStream);
+
+            if (is_string($decodedStream)) {
+                $decodedStreams .= $decodedStream;
+            }
+        }
+
+        self::assertStringContainsString(
+            mb_convert_encoding('First ranking', 'UTF-16BE', 'UTF-8'),
+            $decodedStreams,
+        );
+        self::assertStringContainsString(
+            mb_convert_encoding('Second ranking', 'UTF-16BE', 'UTF-8'),
+            $decodedStreams,
         );
     }
 
