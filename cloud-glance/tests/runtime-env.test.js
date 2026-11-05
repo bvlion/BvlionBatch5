@@ -36,3 +36,8 @@ test('未設定・不正JSON・余計な設定・必須値不足を秘密を露�
       !error.message.includes('fictional-key') && !error.message.includes('private'));
   }
 });
+
+test('引用符内に改行を含むdotenv値も復元できる', () => {
+  const text = sample.replace('HOME_LOCATION="架空の地域"', 'HOME_LOCATION="架空の\n地域"');
+  assert.equal(validateRuntimeEnv(text).HOME_LOCATION, '架空の\n地域');
+});
