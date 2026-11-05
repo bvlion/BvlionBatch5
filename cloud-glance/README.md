@@ -37,7 +37,7 @@ Hostingには60秒の要求上限があるため、関数は60秒、外部API通
 
 以下は利用者の管理アカウントで実施します。本番値・メールアドレス・認証ファイルをIssueやPRへ掲載しないでください。
 
-1. 専用プロジェクト `b-glance` をFirebaseへ登録し、Cloud Functionsに必要なBlazeプランの課金を有効にします。現在固定している `firebase-tools 15.32.1` の初回デプロイでは、Firebase Hosting / Authentication の準備に加え、Cloud Functions、Cloud Run、Cloud Build、Artifact Registry、Eventarc、Pub/Sub、Cloud Storage、Secret Manager、Firebase Extensions、Cloud Billing の各API・サービスと、必要なサービスエージェントを設定します。Firebase CLIが初回デプロイ中にこれらの有効化状況とサービスエージェントを確認するため、管理アカウント側で事前に準備します。
+1. 専用プロジェクト `b-glance` をFirebaseへ登録し、Cloud Functionsに必要なBlazeプランの課金を有効にします。現在固定している `firebase-tools 15.32.1` の初回デプロイでは、Firebase Hosting / Authentication の準備に加え、Cloud Functions、Cloud Run、Cloud Build、Artifact Registry、Eventarc、Pub/Sub、Cloud Storage、Firebase Extensions、Cloud Billing の各API・サービスと、必要なサービスエージェントを設定します。Firebase CLIが初回デプロイ中にこれらの有効化状況とサービスエージェントを確認するため、管理アカウント側で事前に準備します。
 2. FirebaseコンソールでWebアプリを登録します。ブラウザーはHostingの[予約URL](https://firebase.google.com/docs/hosting/reserved-urls) `/__/firebase/init.json` からFirebaseの公開設定を取得するため、実際の設定値をリポジトリへ転記しません。
 3. Firebase AuthenticationのGoogleプロバイダーを有効化し、承認済みドメインへ `b-glance.web.app` を登録します。第三者ストレージ制限のあるスマートフォンでもログインできるよう、認証ドメインをHostingと同じホストへ設定しています。[Firebase公式手順](https://firebase.google.com/docs/auth/web/redirect-best-practices)に従い、Google OAuthクライアントの承認済みリダイレクトURIへ `https://b-glance.web.app/__/auth/handler` も登録します。
 4. **本番設定5項目**を、GitHub Actions Secret `CLOUD_GLANCE_RUNTIME_ENV` にdotenv形式で登録します。リポジトリ・Issue・PR・フロントエンドへ本番値を書かないでください。旧Secret Managerの実際の値は、利用者の管理者操作で安全に取り出して移します。
@@ -57,6 +57,8 @@ SLACK_POST_SETTINGS='{"channel":"#fictional","username":"架空名","icon_url":"
 Slack JSONをシングルクォートで囲めば、JSONのダブルクォートを壊さずに渡せます。改行を含む値はdotenvの引用符内で表現できます。workflowは設定不足・不正JSONをデプロイ前に拒否し、環境変数経由で受け取った文字列を `functions/.env.b-glance` に権限600で一時保存してFirebase CLIに読み込ませます。ファイルは一時ファイルからrenameし、成功・失敗にかかわらず削除します。Git追跡・artifact・cacheやHosting配信物には含めません。
 
 サーバー環境変数はSecret Managerと異なり、Cloud Functions / Cloud Runの設定を閲覧できる管理者から値を参照できます。IAMは必要最小限とし、値を本番ログや公開コードに記録しないでください。環境変数変更には関数の再デプロイが必要です。
+
+実行サービスアカウントには失効トークン・無効利用者確認用の `roles/firebaseauth.viewer` を維持してください。Secret Manager関連の権限と異なり、この権限は移行後も認証に必要です。
 
 Slack App型のWebhookでは投稿先・表示名・アイコンの上書きが反映されないため、必要ならSlack側の設定も確認します。
 
