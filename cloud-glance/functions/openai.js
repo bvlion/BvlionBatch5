@@ -1,9 +1,9 @@
-const { openaiApiKey, homeLocation } = require('./settings');
+const { getOpenaiApiKey, getHomeLocation } = require('./settings');
 
 async function askQuestion(question) {
   const normalizedQuestion = question.trim();
 
-  const apiKey = openaiApiKey.value();
+  const apiKey = getOpenaiApiKey();
   if (!apiKey) throw new Error('cloud-glanceの設定が未完了です。管理者に連絡してください。', { cause: { isPublic: true } });
 
   const timeZone = 'Asia/Tokyo';
@@ -11,7 +11,7 @@ async function askQuestion(question) {
     timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
   }).format(new Date());
-  const location = homeLocation.value().trim();
+  const location = getHomeLocation().trim();
   const prompt = [
     '質問に日本語で簡潔に答えてください。結論を先に述べ、不明な前提を作らず、会話を続けるためだけの質問はしないでください。',
     '今日・明日などの相対日時は、次の現在日時とタイムゾーンを基準にしてください。',

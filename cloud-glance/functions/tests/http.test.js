@@ -37,11 +37,11 @@ beforeEach(() => {
 });
 afterEach(() => mock.restoreAll());
 
-test('デプロイするHTTP関数は1つで、5つのSecretをバインドする', () => {
+test('デプロイするHTTP関数は1つで、Secret Managerのバインドがない', () => {
   assert.deepEqual(Object.keys(require('../index')), ['cloudGlance']);
   assert.deepEqual(cloudGlance.__endpoint.region, ['asia-east1']);
   assert.equal(cloudGlance.__endpoint.timeoutSeconds, 60);
-  assert.equal(cloudGlance.__endpoint.secretEnvironmentVariables.length, 5);
+  assert.deepEqual(cloudGlance.__endpoint.secretEnvironmentVariables || [], []);
 });
 
 for (const path of ['/api/session', '/api/ask', '/api/share']) {
@@ -205,7 +205,7 @@ for (const kind of ['network', 'http', 'settings', 'webhook']) {
 
 for (const settings of ['null', '[]', '"fictional-private-detail"', '42', 'true',
   '{"unexpected":"fictional-private-detail"}', '{"username":42}']) {
-  test(`Slack JSON Secretの不正な形式・許可外キー・非文字列を拒否する: ${settings}`, async () => {
+  test(`Slack JSON設定の不正な形式・許可外キー・非文字列を拒否する: ${settings}`, async () => {
     request.path = '/api/share'; request.body.answer = '架空の回答';
     process.env.SLACK_POST_SETTINGS = settings;
     await sendRequest();
@@ -227,7 +227,7 @@ test('空のSlack JSON設定はWebhook側の設定で共有できる', async () 
   assert.equal(body.icon_url, undefined);
 });
 
-test('Slack JSON Secretの未設定も詳細を公開せず拒否する', async () => {
+test('Slack JSON設定の未設定も詳細を公開せず拒否する', async () => {
   request.path = '/api/share'; request.body.answer = '架空の回答';
   delete process.env.SLACK_POST_SETTINGS;
   await sendRequest();

@@ -30,6 +30,10 @@ jobs:
       - run: npm ci
       - run: npm --prefix functions ci
       - run: npm run build
+      - name: Prepare runtime environment
+        env:
+          CLOUD_GLANCE_RUNTIME_ENV: ${{ secrets.CLOUD_GLANCE_RUNTIME_ENV }}
+        run: node scripts/prepare-runtime-env.js
       - name: Authenticate to b-glance
         uses: google-github-actions/auth@v3
         with:
@@ -44,3 +48,6 @@ jobs:
           curl --fail --silent --show-error https://b-glance.web.app/ > /dev/null
           status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' https://b-glance.web.app/api/session)
           test "$status" = 401
+      - name: Remove temporary runtime environment file
+        if: always()
+        run: rm -f functions/.env.b-glance

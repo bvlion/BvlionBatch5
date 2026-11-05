@@ -1,10 +1,10 @@
-const { incomingWebhookUrl, slackPostSettings } = require('./settings');
+const { getIncomingWebhookUrl, getSlackPostSettings } = require('./settings');
 
 async function shareToSlack(question, answer, citations) {
   const normalizedQuestion = question.trim();
   const normalizedAnswer = answer.trim();
 
-  const webhookUrl = incomingWebhookUrl.value();
+  const webhookUrl = getIncomingWebhookUrl();
   if (!webhookUrl) throw new Error('Slack共有の設定が未完了です。管理者に連絡してください。', { cause: { isPublic: true } });
   if (!/^https:\/\//i.test(webhookUrl)) throw new Error('Slack共有の設定を確認してください。', { cause: { isPublic: true } });
 
@@ -38,7 +38,7 @@ async function shareToSlack(question, answer, citations) {
     });
   }
 
-  const postSettings = slackPostSettings.value();
+  const postSettings = getSlackPostSettings();
   if (!postSettings || typeof postSettings !== 'object' || Array.isArray(postSettings) ||
       Object.keys(postSettings).some(key => !['channel', 'username', 'icon_url'].includes(key) || typeof postSettings[key] !== 'string')) {
     throw new Error('Slack共有の設定を確認してください。', { cause: { isPublic: true } });

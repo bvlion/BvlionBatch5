@@ -27,3 +27,14 @@ test('デプロイは専用タグでHostingと1つの関数だけを対象にす
     'functions:' + config.functions[0].codebase + ':' + config.hosting.rewrites[0].function.functionId
   ]);
 });
+
+test('Secret Managerのバインドを廃止しenvの安全なデプロイ手順を含む', async () => {
+  const index = await readFile('functions/index.js', 'utf8');
+  const settings = await readFile('functions/settings.js', 'utf8');
+  const workflow = await readFile('../.github/workflows/cloud-glance-deploy.yaml', 'utf8');
+  assert.doesNotMatch(index, /secrets\s*:/);
+  assert.doesNotMatch(settings, /defineSecret|defineJsonSecret/);
+  assert.match(settings, /process\.env\.OPENAI_API_KEY/);
+  assert.match(workflow, /CLOUD_GLANCE_RUNTIME_ENV/);
+  assert.match(workflow, /if: always\(\)/);
+});
