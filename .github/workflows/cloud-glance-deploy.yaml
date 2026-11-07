@@ -36,11 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${CLOUD_GLANCE_RUNTIME_ENV:?CLOUD_GLANCE_RUNTIME_ENV is required}"
-          umask 077
-          temp=$(mktemp functions/.env.b-glance.tmp.XXXXXX)
-          trap 'rm -f "$temp"' EXIT
-          printf '%s\n' "$CLOUD_GLANCE_RUNTIME_ENV" > "$temp"
-          mv -- "$temp" functions/.env.b-glance
+          printf '%s\n' "$CLOUD_GLANCE_RUNTIME_ENV" > functions/.env.b-glance
       - name: Authenticate to b-glance
         uses: google-github-actions/auth@v3
         with:
@@ -55,6 +51,6 @@ jobs:
           curl --fail --silent --show-error https://b-glance.web.app/ > /dev/null
           status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' https://b-glance.web.app/api/session)
           test "$status" = 401
-      - name: Remove temporary runtime environment file
+      - name: Remove runtime environment file
         if: always()
         run: rm -f functions/.env.b-glance

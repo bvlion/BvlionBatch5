@@ -54,7 +54,7 @@ SLACK_POST_SETTINGS='{"channel":"#fictional","username":"架空名","icon_url":"
 
 `HOME_GOOGLE_ACCOUNT` は許可Googleアカウントのメールアドレス（複数可、カンマ区切り）、`OPENAI_API_KEY` はOpenAI APIキー、`INCOMING_WEBHOOK_URL` はHTTPS Slack Webhookです。これら3項目は必須です。`HOME_LOCATION` は任意で、未使用なら `HOME_LOCATION=` とします。`SLACK_POST_SETTINGS` はJSONオブジェクトで、キーは `channel`、`username`、`icon_url` のみ、値はすべて文字列とします。設定が不要なら `SLACK_POST_SETTINGS='{}'` としてください。
 
-Slack JSONをシングルクォートで囲めば、JSONのダブルクォートを壊さずに渡せます。改行を含む値はdotenvの引用符内で表現できます。workflowはGitHub Actions Secretが空の場合に失敗し、値の内容を独自解析せず、シェルで `functions/.env.b-glance` に権限600で一時保存してFirebase CLIへ渡します。dotenvの形式や個別設定値はこのステップでは検証しないため、登録時に記入例に従って確認してください。ファイルは一時ファイルからrenameし、成功・失敗にかかわらず削除します。Git追跡・artifact・cacheやHosting配信物には含めません。
+Slack JSONをシングルクォートで囲めば、JSONのダブルクォートを壊さずに渡せます。改行を含む値はdotenvの引用符内で表現できます。workflowはGitHub Actions Secretが空の場合に失敗し、値の内容を独自解析せず、シェルで `functions/.env.b-glance` に書き出してFirebase CLIへ渡します。dotenvの形式や個別設定値はこのステップでは検証しないため、登録時に記入例に従って確認してください。ファイルはデプロイ後、成功・失敗にかかわらず削除します。Git追跡・artifact・cacheやHosting配信物には含めません。
 
 サーバー環境変数はSecret Managerと異なり、Cloud Functions / Cloud Runの設定を閲覧できる管理者から値を参照できます。IAMは必要最小限とし、値を本番ログや公開コードに記録しないでください。環境変数変更には関数の再デプロイが必要です。
 
