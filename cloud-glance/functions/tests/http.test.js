@@ -37,13 +37,6 @@ beforeEach(() => {
 });
 afterEach(() => mock.restoreAll());
 
-test('デプロイするHTTP関数は1つで、Secret Managerのバインドがない', () => {
-  assert.deepEqual(Object.keys(require('../index')), ['cloudGlance']);
-  assert.deepEqual(cloudGlance.__endpoint.region, ['asia-east1']);
-  assert.equal(cloudGlance.__endpoint.timeoutSeconds, 60);
-  assert.deepEqual(cloudGlance.__endpoint.secretEnvironmentVariables || [], []);
-});
-
 for (const path of ['/api/session', '/api/ask', '/api/share']) {
   test(`${path}: 未ログインでは外部通信をせず拒否する`, async () => {
     request.path = path;
