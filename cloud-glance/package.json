@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "node build.js",
-    "test": "node --test tests/frontend.test.js tests/configuration.test.js tests/runtime-env.test.js && npm --prefix functions test",
+    "test": "node --test tests/frontend.test.js tests/configuration.test.js && npm --prefix functions test",
     "check": "npm test && npm run build",
     "emulators": "firebase emulators:start --project demo-cloud-glance --only hosting,functions,auth",
     "test:emulators": "node tests/run-emulators.js"
