@@ -12,12 +12,12 @@
 | サーバー | Cloud Functions for Firebase第2世代、Node.js 22、HTTP関数 `cloudGlance` の1つ。Expressで内部ルーティング |
 | 関数リージョン | `asia-east1`。Firebase Hostingの[推奨リージョン](https://firebase.google.com/docs/hosting/functions)からアジアのリージョンを使用 |
 | 認証 | Firebase AuthenticationのGoogleログインとサーバー側allowlist |
-| 本番設定 | Google Cloud Secret Manager |
+| 本番設定 | Cloud Functionsのサーバー環境変数（GitHub Actions Secretsからデプロイ時に適用） |
 | リリース | `cloud-glance-v*` タグpush、cloud-glance専用GitHub Actions |
 
 `/api/session`（GET）、`/api/ask`（POST）、`/api/share`（POST）はすべて1つの関数内で処理します。Hostingが `/api/**` を同じ関数へ転送します。関数URLへ直接アクセスしても、同じGoogleトークン検証とallowlist照合を行います。HTTP関数・データベース・履歴保存機能は追加しません。
 
-サーバーの `functions/index.js` は初期化と単一関数の公開を扱います。`app.js` がExpressのルーティング・入力検証・共通エラー処理、`authentication.js` が認証・allowlist、`settings.js` がSecret定義、`openai.js` と `slack.js` が各外部APIの処理を扱います。CommonJSの既存構成を維持し、ExpressはFirebase Functions SDKと同じ5.2.1を直接依存として明示しています。フロントエンドのDOM参照は `frontend/app.js` の先頭へ揃えています。
+サーバーの `functions/index.js` は初期化と単一関数の公開を扱います。`app.js` がExpressのルーティング・入力検証・共通エラー処理、`authentication.js` が認証・allowlist、`settings.js` が実行環境変数の取得・検証、`openai.js` と `slack.js` が各外部APIの処理を扱います。CommonJSの既存構成を維持し、ExpressはFirebase Functions SDKと同じ5.2.1を直接依存として明示しています。フロントエンドのDOM参照は `frontend/app.js` の先頭へ揃えています。
 
 HTMLにはCSS・JavaScriptを埋め込みません。Firebase SDK、Marked、DOMPurifyは固定した依存関係をビルドへ含め、実行時のCDN読み込みを置き換えています。Google Apps Scriptの配信・認証・RPC・設定管理・デプロイへの依存はありません。
 
@@ -37,35 +37,46 @@ Hostingには60秒の要求上限があるため、関数は60秒、外部API通
 
 以下は利用者の管理アカウントで実施します。本番値・メールアドレス・認証ファイルをIssueやPRへ掲載しないでください。
 
-1. 専用プロジェクト `b-glance` をFirebaseへ登録し、Cloud Functionsに必要なBlazeプランの課金を有効にします。現在固定している `firebase-tools 15.32.1` の初回デプロイでは、Firebase Hosting / Authentication の準備に加え、Cloud Functions、Cloud Run、Cloud Build、Artifact Registry、Eventarc、Pub/Sub、Cloud Storage、Secret Manager、Firebase Extensions、Cloud Billing の各API・サービスと、必要なサービスエージェントを設定します。Firebase CLIが初回デプロイ中にこれらの有効化状況とサービスエージェントを確認するため、管理アカウント側で事前に準備します。
+1. 専用プロジェクト `b-glance` をFirebaseへ登録し、Cloud Functionsに必要なBlazeプランの課金を有効にします。現在固定している `firebase-tools 15.32.1` の初回デプロイでは、Firebase Hosting / Authentication の準備に加え、Cloud Functions、Cloud Run、Cloud Build、Artifact Registry、Eventarc、Pub/Sub、Cloud Storage、Firebase Extensions、Cloud Billing の各API・サービスと、必要なサービスエージェントを設定します。Firebase CLIが初回デプロイ中にこれらの有効化状況とサービスエージェントを確認するため、管理アカウント側で事前に準備します。
 2. FirebaseコンソールでWebアプリを登録します。ブラウザーはHostingの[予約URL](https://firebase.google.com/docs/hosting/reserved-urls) `/__/firebase/init.json` からFirebaseの公開設定を取得するため、実際の設定値をリポジトリへ転記しません。
 3. Firebase AuthenticationのGoogleプロバイダーを有効化し、承認済みドメインへ `b-glance.web.app` を登録します。第三者ストレージ制限のあるスマートフォンでもログインできるよう、認証ドメインをHostingと同じホストへ設定しています。[Firebase公式手順](https://firebase.google.com/docs/auth/web/redirect-best-practices)に従い、Google OAuthクライアントの承認済みリダイレクトURIへ `https://b-glance.web.app/__/auth/handler` も登録します。
-4. Secret Manager APIを有効化し、次のSecretをすべて作成します。`cloud-glance/` から `npx firebase functions:secrets:set SECRET名 --project b-glance` を実行し、値は安全な入力で登録してください。実値をコマンド引数やファイルへ残さないでください。
+4. **本番設定5項目**を、GitHub Actions Secret `CLOUD_GLANCE_RUNTIME_ENV` にdotenv形式で登録します。リポジトリ・Issue・PR・フロントエンドへ本番値を書かないでください。旧Secret Managerの実際の値は、利用者の管理者操作で安全に取り出して移します。
 
-| Secret | 内容 |
-| --- | --- |
-| `HOME_GOOGLE_ACCOUNT` | 許可するGoogleアカウントのメールアドレス。半角カンマ区切り、比較時に空白除去・小文字化 |
-| `OPENAI_API_KEY` | OpenAI APIキー |
-| `INCOMING_WEBHOOK_URL` | SlackのHTTPS Incoming Webhook URL |
-| `HOME_LOCATION` | 検索に渡すおおまかな地域名。指定しない場合も空のSecretを設定 |
-| `SLACK_POST_SETTINGS` | Firebase標準の `defineJsonSecret` で取得する、移行元の投稿設定を引き継ぐJSONオブジェクト。キーは `channel`、`username`、`icon_url` のみ、各値は文字列。Webhook側の設定だけでよければ `{}` |
+次は**架空値のみ**の記入例です。
 
-移行元のSlack投稿先・表示名・アイコンは本番値なので転記していません。必要な既存値を `SLACK_POST_SETTINGS` へ設定してください。[Slack App型のWebhook](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/)では投稿先・名前・アイコンの上書きが反映されないため、Slack側でも既存の設定を確認します。
+```dotenv
+HOME_GOOGLE_ACCOUNT=allowed@example.invalid
+OPENAI_API_KEY=fictional-openai-key
+INCOMING_WEBHOOK_URL=https://example.invalid/fictional-webhook
+HOME_LOCATION="架空の地域"
+SLACK_POST_SETTINGS='{"channel":"#fictional","username":"架空名","icon_url":"https://example.invalid/icon.png"}'
+```
 
-すべてのSecretは1つの関数にバインドします。実行サービスアカウントには、IDトークンの失効・無効利用者確認に必要な `roles/firebaseauth.viewer` と、各Secretの `roles/secretmanager.secretAccessor` を付与してください。Firebase CLIが付与する構成を含め、初回設定時に確認します。Secretの新バージョンを有効にした場合は関数の再デプロイが必要です。allowlist更新も同じです。失効トークン・無効利用者も拒否するようIDトークンを検証します。
+`HOME_GOOGLE_ACCOUNT` は許可Googleアカウントのメールアドレス（複数可、カンマ区切り）、`OPENAI_API_KEY` はOpenAI APIキー、`INCOMING_WEBHOOK_URL` はHTTPS Slack Webhookです。これら3項目は必須です。`HOME_LOCATION` は任意で、未使用なら `HOME_LOCATION=` とします。`SLACK_POST_SETTINGS` はJSONオブジェクトで、キーは `channel`、`username`、`icon_url` のみ、値はすべて文字列とします。設定が不要なら `SLACK_POST_SETTINGS='{}'` としてください。
+
+Slack JSONをシングルクォートで囲めば、JSONのダブルクォートを壊さずに渡せます。改行を含む値はdotenvの引用符内で表現できます。workflowはGitHub Actions Secretが空の場合に失敗し、値の内容を独自解析せず、シェルで `functions/.env.b-glance` に書き出してFirebase CLIへ渡します。dotenvの形式や個別設定値はこのステップでは検証しないため、登録時に記入例に従って確認してください。ファイルはデプロイ後、成功・失敗にかかわらず削除します。Git追跡・artifact・cacheやHosting配信物には含めません。
+
+サーバー環境変数はSecret Managerと異なり、Cloud Functions / Cloud Runの設定を閲覧できる管理者から値を参照できます。IAMは必要最小限とし、値を本番ログや公開コードに記録しないでください。環境変数変更には関数の再デプロイが必要です。
+
+実行サービスアカウントには失効トークン・無効利用者確認用の `roles/firebaseauth.viewer` を維持してください。Secret Manager関連の権限と異なり、この権限は移行後も認証に必要です。
+
+Slack App型のWebhookでは投稿先・表示名・アイコンの上書きが反映されないため、必要ならSlack側の設定も確認します。
+
+**切り替え順序**: GitHub Actions Secret登録 → PRレビュー・承認とマージ → `cloud-glance-v*` タグリリース → ログイン・質問・地域・Slack共有・回答復元の確認 → 稼働関数がSecretを使わないことを確認 → 対象を提示し承認を得て旧5 Secretの全バージョンを破棄 → このサービス専用の不要なSecret参照権限を整理。Secretの無効化だけでは保存課金を止められません。移行と請求全体の監査はIssue #139、#140で追跡します。
 
 ## GitHub Actionsの設定とリリース
 
 Google Cloud側でデプロイ用サービスアカウントと[Workload Identity Federation](https://github.com/google-github-actions/auth)を用意します。GitHub OIDCを使用し、長期のサービスアカウント鍵は作成しません。連携の条件をこのリポジトリと `refs/tags/cloud-glance-v*` のみに制限し、デプロイ用サービスアカウントへの `roles/iam.workloadIdentityUser` を設定します。
 
-このリポジトリのGitHub Actions Secretsへ次の2つを登録します。値はPublicな文書へ記録しません。
+このリポジトリのGitHub Actions Secretsへ次の3つを登録します。値はPublicな文書へ記録しません。
 
 | GitHub Actions Secret | 内容 |
 | --- | --- |
 | `CLOUD_GLANCE_WORKLOAD_IDENTITY_PROVIDER` | 作成したWorkload Identity Providerの完全名 |
 | `CLOUD_GLANCE_DEPLOY_SERVICE_ACCOUNT` | デプロイ用サービスアカウント |
+| `CLOUD_GLANCE_RUNTIME_ENV` | 本番の5環境変数をまとめたdotenv形式の文字列 |
 
-デプロイ用サービスアカウントには、Hosting のデプロイ用に `roles/firebasehosting.admin`、HTTP Functions の作成・更新とIAM設定用に `roles/cloudfunctions.admin`、Cloud Run の設定用に `roles/run.admin`、プロジェクトのサービス利用権限として `roles/serviceusage.serviceUsageConsumer`、Secret のメタデータ参照用に `roles/secretmanager.viewer`、Firebase CLI が Functions デプロイ時に行う既存 Extension 一覧確認用に `roles/firebase.viewer` を設定します。さらに、実行・ビルドサービスアカウントには必要な範囲で `roles/iam.serviceAccountUser` を設定し、ビルドサービスアカウントには Cloud Build / Artifact Registry で必要な権限を設定します。実行サービスアカウントの Secret payload 参照権限は前節の `roles/secretmanager.secretAccessor` を各 Secret に対して使用します。
+デプロイ用サービスアカウントには、Hosting のデプロイ用に `roles/firebasehosting.admin`、HTTP Functions の作成・更新とIAM設定用に `roles/cloudfunctions.admin`、Cloud Run の設定用に `roles/run.admin`、プロジェクトのサービス利用権限として `roles/serviceusage.serviceUsageConsumer`、Firebase CLI が Functions デプロイ時に行う既存 Extension 一覧確認用に `roles/firebase.viewer` を設定します。さらに、実行・ビルドサービスアカウントには必要な範囲で `roles/iam.serviceAccountUser` を設定し、ビルドサービスアカウントには Cloud Build / Artifact Registry で必要な権限を設定します。
 
 現在の `firebase-tools 15.32.1` は cloud-glance 側で Firebase Extensions を利用していなくても Functions デプロイ中に既存 Extension 一覧を確認します。この確認には `firebaseextensions.instances.list` が必要です。2026-10-05 時点の定義済み `roles/firebaseextensions.viewer`（Beta）にはこの権限が含まれないため、デプロイ用サービスアカウントでは `roles/firebase.viewer` を使用します。[FunctionsのIAM要件](https://cloud.google.com/functions/docs/reference/iam/roles)に沿って初回準備と継続デプロイを確認してください。API有効化やIAM付与は管理アカウントで行います。
 
@@ -86,9 +97,9 @@ npm run test:emulators
 
 `npm run check` はフロントエンドの画面状態・Markdown・出典・共有と、サーバーの認証・allowlist・Responses要求・Slack・失敗処理を架空値で検証し、配信用ファイルをビルドします。外部API通信は置き換え、本番投稿を行いません。
 
-`npm run test:emulators` は `demo-cloud-glance` のHosting・Functions・Authenticationを起動し、実際のHTTP転送、Googleプロバイダーの検証用トークン、allowlist内外、関数URL直接アクセスを検証します。本番プロジェクトへ接続しません。架空値の `functions/.secret.local` を排他的に作成し終了時に削除します。既存ファイルがある場合は上書きせず失敗します。ポート15000・15001・19099が空いていることを確認してください。
+`npm run test:emulators` は `demo-cloud-glance` のHosting・Functions・Authenticationを起動し、実際のHTTP転送、Googleプロバイダーの検証用トークン、allowlist内外、関数URL直接アクセスを検証します。本番プロジェクトへ接続しません。架空値の `functions/.env.demo-cloud-glance` を排他的に作成し終了時に削除します。既存ファイルがある場合は上書きせず失敗します。ポート15000・15001・19099が空いていることを確認してください。
 
-手動のエミュレーター起動には、同名のSecretをすべて架空値で `functions/.secret.local` に設定し、`npm run build`、`npm run emulators` を実行します。Authenticationエミュレーターを使用する接続は、localhost / 127.0.0.1かつ `demo-cloud-glance` の場合だけです。質問・共有の手動操作は実際の外部通信になり得るため、テスト用設定のみ使用してください。
+手動のエミュレーター起動には、同名の環境変数をすべて架空値で `functions/.env.demo-cloud-glance` に設定し、`npm run build`、`npm run emulators` を実行します。Authenticationエミュレーターを使用する接続は、localhost / 127.0.0.1かつ `demo-cloud-glance` の場合だけです。質問・共有の手動操作は実際の外部通信になり得るため、テスト用設定のみ使用してください。
 
 CIは `.github/workflows/cloud-glance-ci.yaml` の `cloud-glance-test` で実行します。mainへのpushとすべてのPull Requestでジョブを起動し、cloud-glanceまたは専用CI / デプロイworkflowの変更がある場合だけ依存関係の復元・検証・ビルド・エミュレーター検証を実行します。関係しない変更では重い検証をスキップし、変更判定が成功すればチェックも成功します。変更判定・検証が失敗した場合はジョブが失敗します。
 
@@ -105,7 +116,7 @@ CIは `.github/workflows/cloud-glance-ci.yaml` の `cloud-glance-test` で実行
 - 回答後の質問欄編集や取得失敗があっても、Slackには回答取得時点の質問と回答が共有される。共有操作前には投稿がなく、実際の投稿先・表示設定・Markdown・出典が正しい。
 - `cloud-glance-v*` のworkflowでHostingと1つのHTTP関数だけが反映され、独自の質問・回答履歴を保存していない。
 
-すべての本番検証が済み、許可利用者が新URLへ移行した後に、QuickAskを廃止可能と判断します。`bvlion/gas` 側の削除そのものはIssue #88のスコープ外です。初期時点でSecret Manager API・課金・認証・GitHub連携が未準備の場合は、それらの利用者側作業と本番検証を残作業として扱います。
+すべての本番検証が済み、許可利用者が新URLへ移行した後に、QuickAskを廃止可能と判断します。`bvlion/gas` 側の削除そのものはIssue #88のスコープ外です。初期時点で課金・認証・GitHub連携・本番環境変数が未準備の場合は、それらの利用者側作業と本番検証を残作業として扱います。
 
 ## データの扱い
 

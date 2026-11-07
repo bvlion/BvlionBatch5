@@ -30,6 +30,13 @@ jobs:
       - run: npm ci
       - run: npm --prefix functions ci
       - run: npm run build
+      - name: Prepare runtime environment
+        env:
+          CLOUD_GLANCE_RUNTIME_ENV: ${{ secrets.CLOUD_GLANCE_RUNTIME_ENV }}
+        run: |
+          set -euo pipefail
+          : "${CLOUD_GLANCE_RUNTIME_ENV:?CLOUD_GLANCE_RUNTIME_ENV is required}"
+          printf '%s\n' "$CLOUD_GLANCE_RUNTIME_ENV" > functions/.env.b-glance
       - name: Authenticate to b-glance
         uses: google-github-actions/auth@v3
         with:
@@ -44,3 +51,6 @@ jobs:
           curl --fail --silent --show-error https://b-glance.web.app/ > /dev/null
           status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' https://b-glance.web.app/api/session)
           test "$status" = 401
+      - name: Remove runtime environment file
+        if: always()
+        run: rm -f functions/.env.b-glance

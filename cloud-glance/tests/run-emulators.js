@@ -2,7 +2,7 @@ import { writeFile, unlink } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 // 検証専用の架空値だけを使い、既存のローカル設定を上書きしない。
-await writeFile('functions/.secret.local', [
+await writeFile('functions/.env.demo-cloud-glance', [
   'HOME_GOOGLE_ACCOUNT=allowed@example.invalid',
   'OPENAI_API_KEY=fictional-test-key',
   'INCOMING_WEBHOOK_URL=https://example.invalid/fictional-webhook',
@@ -20,5 +20,5 @@ try {
     child.on('exit', code => resolve(code ?? 1));
   });
 } finally {
-  await unlink('functions/.secret.local');
+  await unlink('functions/.env.demo-cloud-glance');
 }
